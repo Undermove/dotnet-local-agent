@@ -14,42 +14,70 @@ namespace CodingAgent.Core
     {
         public static async Task RunAsync(string[] args)
         {
-            bool verbose = Array.Exists(args, arg => arg == "--verbose");
+            var cmdArgs = CommandLineArgs.Parse(args);
 
-            if (verbose)
+            if (cmdArgs.Verbose)
             {
                 Console.WriteLine("Verbose logging enabled");
+                Console.WriteLine($"Using provider: {cmdArgs.Provider}");
             }
 
-            var apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-            if (string.IsNullOrEmpty(apiKey))
+            try
             {
-                Console.WriteLine("Error: ANTHROPIC_API_KEY environment variable is not set");
+                var provider = cmdArgs.CreateProvider();
+
+                if (cmdArgs.Provider == AIProviderType.Anthropic)
+                {
+                    // Используем полнофункциональный агент с инструментами для Anthropic
+                    var client = new AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
+                    
+                    if (cmdArgs.Verbose)
+                    {
+                        Console.WriteLine("Anthropic client initialized");
+                    }
+
+                    var tools = new List<ToolDefinition> 
+                    { 
+                        ReadFileDefinition.Instance,
+                        ListFilesDefinition.Instance,
+                        BashDefinition.Instance,
+                        EditFileDefinition.Instance,
+                        CodeSearchDefinition.Instance
+                    };
+                    
+                    if (cmdArgs.Verbose)
+                    {
+                        Console.WriteLine($"Initialized {tools.Count} tools");
+                    }
+
+                    var agent = new AgentWithTools(client, GetUserMessage, tools, cmdArgs.Verbose);
+                    await agent.RunAsync();
+                }
+                else
+                {
+                    // Для других провайдеров используем обычный чат без инструментов
+                    Console.WriteLine("Note: LM Studio provider doesn't support tools yet.");
+                    Console.WriteLine("You can still chat, but code search and editing tools are not available.");
+                    Console.WriteLine("For full functionality, use: --provider anthropic");
+                    Console.WriteLine();
+                    
+                    var agent = new Agent(provider, GetUserMessage, cmdArgs.Verbose);
+                    await agent.RunAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error initializing AI provider: {ex.Message}");
+                if (cmdArgs.Provider == AIProviderType.Anthropic)
+                {
+                    Console.WriteLine("Make sure ANTHROPIC_API_KEY environment variable is set");
+                }
+                else if (cmdArgs.Provider == AIProviderType.LMStudio)
+                {
+                    Console.WriteLine("Make sure LM Studio is running and accessible");
+                }
                 return;
             }
-
-            var client = new AnthropicClient(apiKey);
-            if (verbose)
-            {
-                Console.WriteLine("Anthropic client initialized");
-            }
-
-            var tools = new List<ToolDefinition> 
-            { 
-                ReadFileDefinition.Instance,
-                ListFilesDefinition.Instance,
-                BashDefinition.Instance,
-                EditFileDefinition.Instance,
-                CodeSearchDefinition.Instance
-            };
-            
-            if (verbose)
-            {
-                Console.WriteLine($"Initialized {tools.Count} tools");
-            }
-
-            var agent = new AgentWithTools(client, GetUserMessage, tools, verbose);
-            await agent.RunAsync();
         }
 
         private static string GetUserMessage()
