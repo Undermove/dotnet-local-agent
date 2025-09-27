@@ -115,15 +115,22 @@ public static class AIProviderFactory
     {
         return providerType switch
         {
-            AIProviderType.Anthropic => new AnthropicProvider(
-                apiKey ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? throw new InvalidOperationException("ANTHROPIC_API_KEY environment variable is not set"),
-                model ?? "claude-3-5-sonnet-20241022"
-            ),
+            AIProviderType.Anthropic => CreateAnthropicProvider(apiKey, model),
             AIProviderType.LMStudio => new LMStudioProvider(
-                baseUrl ?? "http://localhost:1234",
+                baseUrl ?? Environment.GetEnvironmentVariable("LM_STUDIO_URL") ?? "http://localhost:1234",
                 model ?? "local-model"
             ),
             _ => throw new ArgumentException($"Unsupported provider type: {providerType}")
         };
+    }
+
+    private static AnthropicProvider CreateAnthropicProvider(string? apiKey, string? model)
+    {
+        var key = apiKey ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new InvalidOperationException("ANTHROPIC_API_KEY environment variable is not set. Please set it or use --provider lmstudio for local AI.");
+        }
+        return new AnthropicProvider(key, model ?? "claude-3-5-sonnet-20241022");
     }
 }
