@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Anthropic.SDK;
 using Newtonsoft.Json;
@@ -25,43 +26,26 @@ namespace CodingAgent.Core
             {
                 var provider = cmdArgs.CreateProvider();
 
-                if (cmdArgs.Provider == AIProviderType.Anthropic)
+                // Используем универсальный агент с инструментами для всех провайдеров
+                var tools = new List<ToolDefinition> 
+                { 
+                    ReadFileDefinition.Instance,
+                    ListFilesDefinition.Instance,
+                    BashDefinition.Instance,
+                    EditFileDefinition.Instance
+                };
+                
+                if (cmdArgs.Verbose)
                 {
-                    // Используем полнофункциональный агент с инструментами для Anthropic
-                    var client = new AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
-                    
-                    if (cmdArgs.Verbose)
+                    Console.WriteLine($"Initialized {tools.Count} tools for {cmdArgs.Provider} provider");
+                    if (cmdArgs.Provider == AIProviderType.LMStudio)
                     {
-                        Console.WriteLine("Anthropic client initialized");
+                        Console.WriteLine("Note: Tool support depends on the model. Llama 3.1 8B Instruct should work well.");
                     }
-
-                    var tools = new List<ToolDefinition> 
-                    { 
-                        ReadFileDefinition.Instance,
-                        ListFilesDefinition.Instance,
-                        BashDefinition.Instance,
-                        EditFileDefinition.Instance
-                    };
-                    
-                    if (cmdArgs.Verbose)
-                    {
-                        Console.WriteLine($"Initialized {tools.Count} tools");
-                    }
-
-                    var agent = new AgentWithTools(client, GetUserMessage, tools, cmdArgs.Verbose);
-                    await agent.RunAsync();
                 }
-                else
-                {
-                    // Для других провайдеров используем обычный чат без инструментов
-                    Console.WriteLine("Note: LM Studio provider doesn't support tools yet.");
-                    Console.WriteLine("You can still chat, but file editing tools are not available.");
-                    Console.WriteLine("For full functionality, use: --provider anthropic");
-                    Console.WriteLine();
-                    
-                    var agent = new Agent(provider, GetUserMessage, cmdArgs.Verbose);
-                    await agent.RunAsync();
-                }
+
+                var agent = new UniversalAgentWithTools(provider, GetUserMessage, tools, cmdArgs.Verbose);
+                await agent.RunAsync();
             }
             catch (Exception ex)
             {
@@ -89,32 +73,84 @@ namespace CodingAgent.Core
         public static ToolDefinition Instance = new ToolDefinition
         {
             Name = "edit_file",
-            Description = @"Make edits to a text file.
+            Description = @"Create new files or edit existing text files.
 
-Replaces 'old_str' with 'new_str' in the given file. 'old_str' and 'new_str' MUST be different from each other.
+CREATING NEW FILES:
+- Set 'old_str' to empty string """"
+- Set 'new_str' to the complete file content you want to create
+- Example: {""path"": ""test.txt"", ""old_str"": """", ""new_str"": ""Hello World!""}
 
-If the file specified with path doesn't exist, it will be created.",
+EDITING EXISTING FILES:
+- Set 'old_str' to the exact text you want to replace (must exist in file)
+- Set 'new_str' to the replacement text
+- 'old_str' and 'new_str' MUST be different
+- 'old_str' must appear exactly once in the file
+- Example: {""path"": ""config.txt"", ""old_str"": ""debug=false"", ""new_str"": ""debug=true""}
+
+IMPORTANT: Always provide meaningful content in 'new_str' - never leave it empty unless you want to delete text.",
             InputSchema = GenerateSchema<EditFileInput>(),
             ExecuteAsync = EditFileAsync
         };
 
         private static async Task<string> EditFileAsync(string input)
         {
-            var editFileInput = JsonConvert.DeserializeObject<EditFileInput>(input);
+            Console.WriteLine($"Raw input JSON: {input}");
+            
+            // Попробуем System.Text.Json для лучшей поддержки Unicode
+            EditFileInput editFileInput;
+            try
+            {
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                };
+                editFileInput = System.Text.Json.JsonSerializer.Deserialize<EditFileInput>(input, options);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"System.Text.Json failed: {ex.Message}, trying Newtonsoft.Json");
+                // Fallback to Newtonsoft.Json
+                var settings = new JsonSerializerSettings
+                {
+                    StringEscapeHandling = StringEscapeHandling.Default
+                };
+                editFileInput = JsonConvert.DeserializeObject<EditFileInput>(input, settings);
+            }
             
             Console.WriteLine($"Editing file: {editFileInput.Path}");
+            Console.WriteLine($"OldStr: '{editFileInput.OldStr}' (length: {editFileInput.OldStr?.Length ?? 0})");
+            Console.WriteLine($"NewStr: '{editFileInput.NewStr}' (length: {editFileInput.NewStr?.Length ?? 0})");
             
             try
             {
-                // Validate inputs
+                string content;
+                bool fileExists = File.Exists(editFileInput.Path);
+                
+                // Special case: creating a new file
+                if (!fileExists && string.IsNullOrEmpty(editFileInput.OldStr))
+                {
+                    if (string.IsNullOrEmpty(editFileInput.NewStr))
+                    {
+                        throw new ArgumentException("When creating a new file, 'new_str' cannot be empty. Please provide the content you want to write to the file.");
+                    }
+                    Console.WriteLine($"Creating new file: {editFileInput.Path}");
+                    await File.WriteAllTextAsync(editFileInput.Path, editFileInput.NewStr);
+                    return $"Successfully created file '{editFileInput.Path}' with {editFileInput.NewStr.Length} characters of content.";
+                }
+                
+                // Check if trying to edit non-existent file
+                if (!fileExists && !string.IsNullOrEmpty(editFileInput.OldStr))
+                {
+                    throw new ArgumentException($"File '{editFileInput.Path}' does not exist. To create a new file, set 'old_str' to empty string and provide content in 'new_str'.");
+                }
+
+                // Validate inputs for editing existing files
                 if (editFileInput.OldStr == editFileInput.NewStr)
                 {
                     throw new ArgumentException("old_str and new_str must be different");
                 }
 
-                string content;
-                bool fileExists = File.Exists(editFileInput.Path);
-                
                 if (fileExists)
                 {
                     content = await File.ReadAllTextAsync(editFileInput.Path);
@@ -173,12 +209,15 @@ If the file specified with path doesn't exist, it will be created.",
     public class EditFileInput
     {
         [JsonProperty("path")]
+        [System.Text.Json.Serialization.JsonPropertyName("path")]
         public string Path { get; set; }
         
         [JsonProperty("old_str")]
+        [System.Text.Json.Serialization.JsonPropertyName("old_str")]
         public string OldStr { get; set; }
         
         [JsonProperty("new_str")]
+        [System.Text.Json.Serialization.JsonPropertyName("new_str")]
         public string NewStr { get; set; }
     }
 }

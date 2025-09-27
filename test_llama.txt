@@ -1,0 +1,15 @@
+This is a test file for Llama 3.1 8B Instruct integration.
+
+Current status: Testing the universal agent with tools system.
+
+Features to test:
+1. File reading
+2. File editing
+3. Directory listing
+4. Bash commands
+
+The system should be able to:
+- Read this file
+- Edit its contents
+- List files in the directory
+- Execute simple bash commands

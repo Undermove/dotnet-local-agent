@@ -308,13 +308,16 @@ namespace CodingAgent.Core
 
             try
             {
+                var systemPrompt = GenerateSystemPrompt();
+                
                 var parameters = new MessageParameters
                 {
                     Model = "claude-3-sonnet-20240229",
                     MaxTokens = 1024,
                     Messages = conversation,
                     Tools = anthropicTools,
-                    Stream = false
+                    Stream = false,
+                    System = new List<SystemMessage> { new SystemMessage(systemPrompt) }
                 };
 
                 var response = await _client.Messages.GetClaudeMessageAsync(parameters);
@@ -338,6 +341,48 @@ namespace CodingAgent.Core
                 }
                 return null;
             }
+        }
+
+        private string GenerateSystemPrompt()
+        {
+            var prompt = @"You are a helpful coding assistant with access to powerful tools for file operations and code analysis.
+
+AVAILABLE TOOLS:
+";
+
+            foreach (var tool in _tools)
+            {
+                prompt += $"- {tool.Name}: {tool.Description}\n";
+            }
+
+            prompt += @"
+CRITICAL INSTRUCTIONS:
+1. You MUST use the available tools to perform file operations
+2. NEVER provide code examples or instructions - USE THE TOOLS DIRECTLY
+3. When asked to create/edit a file, immediately use the edit_file tool
+4. When asked to read a file, immediately use the read_file tool  
+5. When asked to search code, immediately use the code_search tool
+6. When asked to run commands, immediately use the bash tool
+7. Do NOT explain how to do something - DO IT using the tools
+
+EXAMPLES OF CORRECT BEHAVIOR:
+- User: ""Create a file called test.txt with content 'hello'""
+  → IMMEDIATELY call edit_file(Path=""test.txt"", OldStr="""", NewStr=""hello"")
+- User: ""What's in the README file?""
+  → IMMEDIATELY call read_file(Path=""README.md"")
+- User: ""Find all TODO comments""
+  → IMMEDIATELY call code_search tool to search for them
+- User: ""Создай файл test.txt с содержимым 'Привет мир!'""
+  → IMMEDIATELY call edit_file(Path=""test.txt"", OldStr="""", NewStr=""Привет мир!"")
+
+WRONG BEHAVIOR (DO NOT DO THIS):
+- Providing Python/bash code examples
+- Explaining how to create files manually
+- Giving step-by-step instructions
+
+YOU HAVE REAL TOOLS - USE THEM IMMEDIATELY!";
+
+            return prompt;
         }
     }
 

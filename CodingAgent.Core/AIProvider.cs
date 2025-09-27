@@ -16,6 +16,21 @@ public enum AIProviderType
 public interface IAIProvider
 {
     Task<string> SendMessageAsync(string message, List<object>? tools = null, bool verbose = false);
+    Task<AIResponse> SendMessageWithToolsAsync(List<ChatMessage> messages, List<object>? tools = null, bool verbose = false);
+}
+
+public class AIResponse
+{
+    public string? TextContent { get; set; }
+    public List<ToolCall> ToolCalls { get; set; } = new();
+    public bool HasToolCalls => ToolCalls.Count > 0;
+}
+
+public class ToolCall
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Arguments { get; set; } = "";
 }
 
 public class AnthropicProvider : IAIProvider
@@ -58,6 +73,19 @@ public class AnthropicProvider : IAIProvider
 
         return "No response received.";
     }
+
+    public async Task<AIResponse> SendMessageWithToolsAsync(List<ChatMessage> messages, List<object>? tools = null, bool verbose = false)
+    {
+        // Для Anthropic пока используем старый метод и конвертируем результат
+        var firstMessage = messages.LastOrDefault()?.Content?.FirstOrDefault()?.ToString() ?? "";
+        var textResponse = await SendMessageAsync(firstMessage, tools, verbose);
+        
+        return new AIResponse
+        {
+            TextContent = textResponse,
+            ToolCalls = new List<ToolCall>() // TODO: Реализовать парсинг tool calls из Anthropic response
+        };
+    }
 }
 
 public class LMStudioProvider : IAIProvider
@@ -84,27 +112,171 @@ public class LMStudioProvider : IAIProvider
             new UserChatMessage(message)
         };
 
-        // Примечание: LM Studio может не поддерживать tools в зависимости от модели
-        // Поэтому пока не добавляем tools для LM Studio
-
         if (verbose)
         {
             Console.WriteLine($"🤖 Sending message to LM Studio ({_model})...");
+            if (tools != null && tools.Count > 0)
+            {
+                Console.WriteLine($"📋 Sending {tools.Count} tools to model");
+            }
         }
 
         try
         {
             var chatClient = _client.GetChatClient(_model);
-            var response = await chatClient.CompleteChatAsync(messages, new ChatCompletionOptions
+            var options = new ChatCompletionOptions
             {
                 Temperature = 0.7f
-            });
+            };
+
+            // Добавляем поддержку tools для моделей, которые их поддерживают (например, Llama 3.1)
+            if (tools != null && tools.Count > 0)
+            {
+                // Конвертируем tools в формат OpenAI
+                var openAITools = new List<ChatTool>();
+                foreach (var tool in tools)
+                {
+                    if (tool is ChatTool chatTool)
+                    {
+                        openAITools.Add(chatTool);
+                    }
+                }
+                
+                if (openAITools.Count > 0)
+                {
+                    // Используем правильный способ добавления tools
+                    foreach (var tool in openAITools)
+                    {
+                        options.Tools.Add(tool);
+                    }
+                    if (verbose)
+                    {
+                        Console.WriteLine($"✅ Added {openAITools.Count} tools to request");
+                    }
+                }
+            }
+            
+            var response = await chatClient.CompleteChatAsync(messages, options);
             
             return response.Value.Content[0].Text;
         }
         catch (Exception ex)
         {
             return $"Error connecting to LM Studio: {ex.Message}. Make sure LM Studio is running on the configured endpoint";
+        }
+    }
+
+    public async Task<AIResponse> SendMessageWithToolsAsync(List<ChatMessage> messages, List<object>? tools = null, bool verbose = false)
+    {
+        if (verbose)
+        {
+            Console.WriteLine($"🤖 Sending {messages.Count} messages to LM Studio ({_model})...");
+            if (tools != null && tools.Count > 0)
+            {
+                Console.WriteLine($"📋 Sending {tools.Count} tools to model");
+            }
+        }
+
+        try
+        {
+            var chatClient = _client.GetChatClient(_model);
+            var options = new ChatCompletionOptions
+            {
+                Temperature = 0.7f
+            };
+
+            // Добавляем поддержку tools для моделей, которые их поддерживают (например, Llama 3.1)
+            if (tools != null && tools.Count > 0)
+            {
+                if (verbose)
+                {
+                    Console.WriteLine($"🔍 Processing {tools.Count} tools for LM Studio...");
+                }
+                
+                // Конвертируем tools в формат OpenAI
+                var openAITools = new List<ChatTool>();
+                foreach (var tool in tools)
+                {
+                    if (tool is ChatTool chatTool)
+                    {
+                        openAITools.Add(chatTool);
+                        if (verbose)
+                        {
+                            Console.WriteLine($"🔧 Tool: {chatTool.Kind} - Function: {chatTool.FunctionName}");
+                        }
+                    }
+                    else if (verbose)
+                    {
+                        Console.WriteLine($"⚠️ Skipping tool of type: {tool.GetType().Name}");
+                    }
+                }
+                
+                if (openAITools.Count > 0)
+                {
+                    // Используем правильный способ добавления tools
+                    foreach (var tool in openAITools)
+                    {
+                        options.Tools.Add(tool);
+                    }
+                    if (verbose)
+                    {
+                        Console.WriteLine($"✅ Added {openAITools.Count} tools to request");
+                    }
+                }
+                else if (verbose)
+                {
+                    Console.WriteLine($"❌ No valid ChatTool objects found in {tools.Count} provided tools");
+                }
+            }
+            
+            var response = await chatClient.CompleteChatAsync(messages, options);
+            var chatResponse = response.Value;
+
+            var aiResponse = new AIResponse();
+
+            // Обрабатываем текстовый контент
+            if (chatResponse.Content.Count > 0)
+            {
+                aiResponse.TextContent = chatResponse.Content[0].Text;
+            }
+
+            // Обрабатываем tool calls
+            if (chatResponse.ToolCalls.Count > 0)
+            {
+                foreach (var toolCall in chatResponse.ToolCalls)
+                {
+                    aiResponse.ToolCalls.Add(new ToolCall
+                    {
+                        Id = toolCall.Id,
+                        Name = toolCall.FunctionName,
+                        Arguments = toolCall.FunctionArguments.ToString()
+                    });
+                }
+
+                if (verbose)
+                {
+                    Console.WriteLine($"🔧 Received {aiResponse.ToolCalls.Count} tool calls from model");
+                }
+            }
+
+            return aiResponse;
+        }
+        catch (Exception ex)
+        {
+            if (verbose)
+            {
+                Console.WriteLine($"❌ LM Studio API Error: {ex.GetType().Name}");
+                Console.WriteLine($"❌ Message: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"❌ Inner Exception: {ex.InnerException.Message}");
+                }
+            }
+            
+            return new AIResponse
+            {
+                TextContent = $"Error connecting to LM Studio: {ex.Message}. Make sure LM Studio is running on the configured endpoint"
+            };
         }
     }
 }
