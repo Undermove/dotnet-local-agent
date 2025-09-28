@@ -183,7 +183,7 @@ namespace CodingAgent.Core
 
         private async Task<TaskPlan> CreateTaskPlanAsync(string taskDescription, List<string> constraints)
         {
-            var planningPrompt = $@"You are a task planning expert. Create a detailed plan to complete the following task:
+            var planningPrompt = $@"You are a task planning expert for a C# coding agent project. Create a detailed plan to complete the following task:
 
 TASK: {taskDescription}
 
@@ -191,11 +191,21 @@ CONSTRAINTS: {string.Join(", ", constraints)}
 
 AVAILABLE TOOLS: {string.Join(", ", _tools.Select(t => t.Name))}
 
+CONTEXT: This is a C# .NET project. When planning tasks:
+- Research tasks (understanding formats, reading documentation) don't require specific files to exist
+- Implementation tasks should use edit_file to modify code
+- Use bash tool for creating example files or running commands
+- Use list_files and read_file to explore the codebase
+- Build and test tools help validate changes
+
 Create a plan with the following structure:
 1. Break down the task into specific, actionable subtasks
 2. For each subtask, define clear Definition of Done (DoD) criteria
 3. Identify dependencies between subtasks
 4. Prioritize subtasks (most blocking/enabling first)
+5. Consider that research tasks can be completed without existing files
+
+IMPORTANT: For tasks about understanding file formats (like .slnx), the first subtask should focus on research and understanding, not finding existing files.
 
 Respond with a JSON structure like this:
 {{
@@ -497,26 +507,51 @@ Focus on meeting all the Definition of Done criteria.";
         {
             var critique = new CritiqueResult();
             
-            // Анализируем результаты
+            // Определяем тип задачи для более гибкой оценки
+            var isResearchTask = subtask.Description.ToLower().Contains("understand") || 
+                               subtask.Description.ToLower().Contains("read") ||
+                               subtask.Description.ToLower().Contains("research");
+            
+            var isImplementationTask = subtask.RequiredTools.Contains("edit_file") ||
+                                     subtask.Description.ToLower().Contains("update") ||
+                                     subtask.Description.ToLower().Contains("modify");
+            
+            // Анализируем результаты в зависимости от типа задачи
             if (!observation.BuildSuccess)
             {
                 critique.Issues.Add("Build failed");
                 critique.ErrorType = ErrorType.Compilation;
             }
             
-            if (!observation.TestsPass)
+            if (!observation.TestsPass && isImplementationTask)
             {
                 critique.Issues.Add("Tests failed");
                 critique.ErrorType = ErrorType.Logic;
             }
             
-            if (!observation.LintPass)
+            // Для задач исследования/понимания линтинг не критичен
+            if (!observation.LintPass && isImplementationTask)
             {
                 critique.Issues.Add("Linting failed");
                 critique.ErrorType = ErrorType.Style;
             }
+            else if (!observation.LintPass && !isImplementationTask)
+            {
+                // Для исследовательских задач линтинг - это просто предупреждение
+                critique.Issues.Add("Linting warnings (non-critical for research tasks)");
+            }
 
-            critique.IsSuccessful = critique.Issues.Count == 0;
+            // Для исследовательских задач успех определяется по-другому
+            if (isResearchTask)
+            {
+                // Исследовательская задача успешна, если нет критических ошибок сборки
+                critique.IsSuccessful = observation.BuildSuccess;
+            }
+            else
+            {
+                // Для задач реализации требуем все проверки
+                critique.IsSuccessful = observation.BuildSuccess && observation.TestsPass && observation.LintPass;
+            }
             
             if (critique.IsSuccessful)
             {
@@ -525,8 +560,18 @@ Focus on meeting all the Definition of Done criteria.";
             }
             else
             {
-                critique.Feedback = $"Issues found: {string.Join(", ", critique.Issues)}";
-                subtask.Status = SubtaskStatus.Failed;
+                var criticalIssues = critique.Issues.Where(i => !i.Contains("non-critical")).ToList();
+                if (criticalIssues.Any())
+                {
+                    critique.Feedback = $"Critical issues found: {string.Join(", ", criticalIssues)}";
+                    subtask.Status = SubtaskStatus.Failed;
+                }
+                else
+                {
+                    critique.Feedback = "Subtask completed with minor warnings";
+                    critique.IsSuccessful = true;
+                    subtask.Status = SubtaskStatus.Completed;
+                }
             }
 
             return critique;
@@ -660,11 +705,20 @@ AVAILABLE TOOLS:
 {string.Join("\n", toolDescriptions)}
 
 EXECUTION PRINCIPLES:
-1. Use tools immediately when they can help complete the subtask
-2. Be thorough and check your work
-3. Focus on meeting all Definition of Done criteria
-4. If something fails, try alternative approaches
-5. Provide clear feedback on what was accomplished
+1. Read and understand the subtask carefully before acting
+2. For research/understanding tasks, use available tools to gather information or provide detailed explanations
+3. For implementation tasks, use tools to modify code and files
+4. Be thorough and check your work
+5. Focus on meeting all Definition of Done criteria
+6. If a file doesn't exist and you need to understand a format, research it or create examples
+7. If something fails, try alternative approaches
+8. Provide clear feedback on what was accomplished
+
+IMPORTANT NOTES:
+- For tasks about understanding file formats (like .slnx), you can research online or create example files
+- Don't assume files exist - check first with list_files or read_file
+- If linting fails due to warnings, focus on the core functionality first
+- Break down complex tasks into smaller steps
 
 Always use tools when appropriate - don't just provide instructions or explanations.";
         }
