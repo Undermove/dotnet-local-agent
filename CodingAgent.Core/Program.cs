@@ -39,6 +39,9 @@ namespace CodingAgent.Core
                     case "search":
                         await CodeSearchToolProgram.RunAsync(remainingArgs);
                         break;
+                    case "complete":
+                        await TaskCompletionProgram.RunAsync(remainingArgs);
+                        break;
                     default:
                         Console.WriteLine($"Unknown command: {command}");
                         ShowHelp();
@@ -62,12 +65,13 @@ namespace CodingAgent.Core
             Console.WriteLine("Usage: dotnet run <command> [options]");
             Console.WriteLine();
             Console.WriteLine("Commands:");
-            Console.WriteLine("  chat    - Basic chat with AI");
-            Console.WriteLine("  read    - Chat with file reading capability");
-            Console.WriteLine("  list    - Chat with file listing capability");
-            Console.WriteLine("  bash    - Chat with shell command execution");
-            Console.WriteLine("  edit    - Chat with file editing capability");
-            Console.WriteLine("  search  - Chat with code search capability");
+            Console.WriteLine("  chat     - Basic chat with AI");
+            Console.WriteLine("  read     - Chat with file reading capability");
+            Console.WriteLine("  list     - Chat with file listing capability");
+            Console.WriteLine("  bash     - Chat with shell command execution");
+            Console.WriteLine("  edit     - Chat with file editing capability");
+            Console.WriteLine("  search   - Chat with code search capability");
+            Console.WriteLine("  complete - Advanced task completion agent (TOTE cycle)");
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  --verbose           Enable detailed logging");
@@ -80,6 +84,7 @@ namespace CodingAgent.Core
             Console.WriteLine("  dotnet run chat --provider lmstudio");
             Console.WriteLine("  dotnet run read --provider lmstudio --base-url http://localhost:1234");
             Console.WriteLine("  dotnet run edit --verbose --provider anthropic");
+            Console.WriteLine("  dotnet run complete --verbose --provider anthropic");
             Console.WriteLine();
             Console.WriteLine("Environment Variables:");
             Console.WriteLine("  ANTHROPIC_API_KEY  Required for Anthropic provider");
