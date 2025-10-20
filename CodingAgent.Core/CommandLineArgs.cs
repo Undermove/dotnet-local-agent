@@ -17,6 +17,10 @@ public class CommandLineArgs
         {
             result.Provider = AIProviderType.LMStudio;
         }
+        else if (defaultProvider == "openai")
+        {
+            result.Provider = AIProviderType.OpenAI;
+        }
 
         // Получаем базовый URL для LM Studio из переменной окружения
         result.BaseUrl = Environment.GetEnvironmentVariable("LM_STUDIO_URL");
@@ -37,6 +41,7 @@ public class CommandLineArgs
                         {
                             "anthropic" => AIProviderType.Anthropic,
                             "lmstudio" => AIProviderType.LMStudio,
+                            "openai" => AIProviderType.OpenAI,
                             _ => throw new ArgumentException($"Unknown provider: {args[i + 1]}")
                         };
                         i++; // Skip the next argument as it's the provider name

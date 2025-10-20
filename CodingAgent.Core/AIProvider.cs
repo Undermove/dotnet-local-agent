@@ -10,7 +10,8 @@ namespace CodingAgent.Core;
 public enum AIProviderType
 {
     Anthropic,
-    LMStudio
+    LMStudio,
+    OpenAI
 }
 
 public interface IAIProvider
@@ -88,6 +89,182 @@ public class AnthropicProvider : IAIProvider
     }
 }
 
+public class OpenAIProvider : IAIProvider
+{
+    private readonly OpenAIClient _client;
+    private readonly string _model;
+
+    public OpenAIProvider(string apiKey, string model = "gpt-4")
+    {
+        _client = new OpenAIClient(new ApiKeyCredential(apiKey));
+        _model = model;
+    }
+
+    public async Task<string> SendMessageAsync(string message, List<object>? tools = null, bool verbose = false)
+    {
+        var messages = new List<ChatMessage>
+        {
+            new UserChatMessage(message)
+        };
+
+        if (verbose)
+        {
+            Console.WriteLine($"🤖 Sending message to OpenAI ({_model})...");
+            if (tools != null && tools.Count > 0)
+            {
+                Console.WriteLine($"📋 Sending {tools.Count} tools to model");
+            }
+        }
+
+        try
+        {
+            var chatClient = _client.GetChatClient(_model);
+            var options = new ChatCompletionOptions
+            {
+            };
+
+            if (tools != null && tools.Count > 0)
+            {
+                var openAITools = new List<ChatTool>();
+                foreach (var tool in tools)
+                {
+                    if (tool is ChatTool chatTool)
+                    {
+                        openAITools.Add(chatTool);
+                    }
+                }
+                
+                if (openAITools.Count > 0)
+                {
+                    foreach (var tool in openAITools)
+                    {
+                        options.Tools.Add(tool);
+                    }
+                    if (verbose)
+                    {
+                        Console.WriteLine($"✅ Added {openAITools.Count} tools to request");
+                    }
+                }
+            }
+            
+            var response = await chatClient.CompleteChatAsync(messages, options);
+            return response.Value.Content[0].Text;
+        }
+        catch (Exception ex)
+        {
+            return $"Error connecting to OpenAI: {ex.Message}. Make sure OPENAI_API_KEY is set correctly.";
+        }
+    }
+
+    public async Task<AIResponse> SendMessageWithToolsAsync(List<ChatMessage> messages, List<object>? tools = null, bool verbose = false)
+    {
+        if (verbose)
+        {
+            Console.WriteLine($"🤖 Sending {messages.Count} messages to OpenAI ({_model})...");
+            if (tools != null && tools.Count > 0)
+            {
+                Console.WriteLine($"📋 Sending {tools.Count} tools to model");
+            }
+        }
+
+        try
+        {
+            var chatClient = _client.GetChatClient(_model);
+            var options = new ChatCompletionOptions
+            {
+            };
+
+            if (tools != null && tools.Count > 0)
+            {
+                if (verbose)
+                {
+                    Console.WriteLine($"🔍 Processing {tools.Count} tools for OpenAI...");
+                }
+                
+                var openAITools = new List<ChatTool>();
+                foreach (var tool in tools)
+                {
+                    if (tool is ChatTool chatTool)
+                    {
+                        openAITools.Add(chatTool);
+                        if (verbose)
+                        {
+                            Console.WriteLine($"🔧 Tool: {chatTool.Kind} - Function: {chatTool.FunctionName}");
+                        }
+                    }
+                    else if (verbose)
+                    {
+                        Console.WriteLine($"⚠️ Skipping tool of type: {tool.GetType().Name}");
+                    }
+                }
+                
+                if (openAITools.Count > 0)
+                {
+                    foreach (var tool in openAITools)
+                    {
+                        options.Tools.Add(tool);
+                    }
+                    if (verbose)
+                    {
+                        Console.WriteLine($"✅ Added {openAITools.Count} tools to request");
+                    }
+                }
+                else if (verbose)
+                {
+                    Console.WriteLine($"❌ No valid ChatTool objects found in {tools.Count} provided tools");
+                }
+            }
+            
+            var response = await chatClient.CompleteChatAsync(messages, options);
+            var chatResponse = response.Value;
+
+            var aiResponse = new AIResponse();
+
+            if (chatResponse.Content.Count > 0)
+            {
+                aiResponse.TextContent = chatResponse.Content[0].Text;
+            }
+
+            if (chatResponse.ToolCalls.Count > 0)
+            {
+                foreach (var toolCall in chatResponse.ToolCalls)
+                {
+                    aiResponse.ToolCalls.Add(new ToolCall
+                    {
+                        Id = toolCall.Id,
+                        Name = toolCall.FunctionName,
+                        Arguments = toolCall.FunctionArguments.ToString()
+                    });
+                }
+
+                if (verbose)
+                {
+                    Console.WriteLine($"🔧 Received {aiResponse.ToolCalls.Count} tool calls from model");
+                }
+            }
+
+            return aiResponse;
+        }
+        catch (Exception ex)
+        {
+            if (verbose)
+            {
+                Console.WriteLine($"❌ OpenAI API Error: {ex.GetType().Name}");
+                Console.WriteLine($"❌ Message: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"❌ Inner Exception: {ex.InnerException.Message}");
+                }
+            }
+            
+            return new AIResponse
+            {
+                TextContent = $"Error connecting to OpenAI: {ex.Message}. Make sure OPENAI_API_KEY is set correctly."
+            };
+        }
+    }
+}
+
 public class LMStudioProvider : IAIProvider
 {
     private readonly OpenAIClient _client;
@@ -126,7 +303,6 @@ public class LMStudioProvider : IAIProvider
             var chatClient = _client.GetChatClient(_model);
             var options = new ChatCompletionOptions
             {
-                Temperature = 0.7f
             };
 
             // Добавляем поддержку tools для моделей, которые их поддерживают (например, Llama 3.1)
@@ -182,7 +358,6 @@ public class LMStudioProvider : IAIProvider
             var chatClient = _client.GetChatClient(_model);
             var options = new ChatCompletionOptions
             {
-                Temperature = 0.7f
             };
 
             // Добавляем поддержку tools для моделей, которые их поддерживают (например, Llama 3.1)
@@ -292,6 +467,7 @@ public static class AIProviderFactory
                 baseUrl ?? Environment.GetEnvironmentVariable("LM_STUDIO_URL") ?? "http://localhost:1234",
                 model ?? "local-model"
             ),
+            AIProviderType.OpenAI => CreateOpenAIProvider(apiKey, model),
             _ => throw new ArgumentException($"Unsupported provider type: {providerType}")
         };
     }
@@ -304,5 +480,15 @@ public static class AIProviderFactory
             throw new InvalidOperationException("ANTHROPIC_API_KEY environment variable is not set. Please set it or use --provider lmstudio for local AI.");
         }
         return new AnthropicProvider(key, model ?? "claude-3-5-sonnet-20241022");
+    }
+
+    private static OpenAIProvider CreateOpenAIProvider(string? apiKey, string? model)
+    {
+        var key = apiKey ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new InvalidOperationException("OPENAI_API_KEY environment variable is not set. Please set it or use --provider lmstudio for local AI.");
+        }
+        return new OpenAIProvider(key, model ?? "gpt-4");
     }
 }
