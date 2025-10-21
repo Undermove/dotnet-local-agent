@@ -168,7 +168,7 @@ public class UniversalAgentWithTools(
     private async Task<AIResponse?> RunInferenceAsync(List<ChatMessage> conversation)
     {
         // Конвертируем наши ToolDefinition в ChatTool для OpenAI SDK
-        var openAITools = ToolConverter.ConvertToOpenAITools(tools);
+        var openAITools = ToolConverter.ConvertToOpenAITools(tools, verbose);
 
         if (verbose)
         {

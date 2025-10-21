@@ -100,6 +100,13 @@ public static class ListFilesDefinition
                 
             await Task.Run(() =>
             {
+                // Check if directory exists
+                if (!Directory.Exists(dir))
+                {
+                    Console.WriteLine($"Directory does not exist: {dir}");
+                    return;
+                }
+                
                 var directoryInfo = new DirectoryInfo(dir);
                     
                 // Get all files and directories recursively

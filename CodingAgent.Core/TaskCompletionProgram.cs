@@ -79,7 +79,7 @@ public class TaskCompletionProgram
             
         while (true)
         {
-            Console.Write("\u001b[94mTask\u001b[0m: ");
+            Console.Write("Task: ");
             var taskInput = Console.ReadLine();
                 
             if (string.IsNullOrWhiteSpace(taskInput) || taskInput.ToLower() == "quit")
@@ -90,7 +90,7 @@ public class TaskCompletionProgram
 
             Console.WriteLine();
             Console.WriteLine("Any constraints? (press Enter to skip, or provide comma-separated constraints):");
-            Console.Write("\u001b[93mConstraints\u001b[0m: ");
+            Console.WriteLine("Constraints: ");
             var constraintsInput = Console.ReadLine();
                 
             var constraints = new List<string>();

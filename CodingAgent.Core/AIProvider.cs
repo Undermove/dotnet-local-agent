@@ -208,12 +208,26 @@ public class OpenAIProvider(string apiKey, string model = "gpt-4") : IAIProvider
             if (chatResponse.Content.Count > 0)
             {
                 aiResponse.TextContent = chatResponse.Content[0].Text;
+                if (verbose)
+                {
+                    Console.WriteLine($"📝 Text response length: {aiResponse.TextContent.Length} chars");
+                }
+            }
+
+            if (verbose)
+            {
+                Console.WriteLine($"🔍 OpenAI - Raw ToolCalls.Count: {chatResponse.ToolCalls.Count}");
             }
 
             if (chatResponse.ToolCalls.Count > 0)
             {
                 foreach (var toolCall in chatResponse.ToolCalls)
                 {
+                    if (verbose)
+                    {
+                        Console.WriteLine($"🔍 OpenAI - Raw ToolCall: FunctionName='{toolCall.FunctionName}', Id='{toolCall.Id}'");
+                    }
+
                     aiResponse.ToolCalls.Add(new ToolCall
                     {
                         Id = toolCall.Id,
@@ -224,7 +238,11 @@ public class OpenAIProvider(string apiKey, string model = "gpt-4") : IAIProvider
 
                 if (verbose)
                 {
-                    Console.WriteLine($"🔧 Received {aiResponse.ToolCalls.Count} tool calls from model");
+                    Console.WriteLine($"🔧 OpenAI - Converted {aiResponse.ToolCalls.Count} tool calls");
+                    foreach (var tc in aiResponse.ToolCalls)
+                    {
+                        Console.WriteLine($"   - Converted ToolCall: Name='{tc.Name}', Id='{tc.Id}'");
+                    }
                 }
             }
 
@@ -398,13 +416,27 @@ public class LMStudioProvider : IAIProvider
             if (chatResponse.Content.Count > 0)
             {
                 aiResponse.TextContent = chatResponse.Content[0].Text;
+                if (verbose)
+                {
+                    Console.WriteLine($"📝 Text response length: {aiResponse.TextContent.Length} chars");
+                }
             }
 
             // Обрабатываем tool calls
+            if (verbose)
+            {
+                Console.WriteLine($"🔍 LMStudio - Raw ToolCalls.Count: {chatResponse.ToolCalls.Count}");
+            }
+
             if (chatResponse.ToolCalls.Count > 0)
             {
                 foreach (var toolCall in chatResponse.ToolCalls)
                 {
+                    if (verbose)
+                    {
+                        Console.WriteLine($"🔍 LMStudio - Raw ToolCall: FunctionName='{toolCall.FunctionName}', Id='{toolCall.Id}'");
+                    }
+
                     aiResponse.ToolCalls.Add(new ToolCall
                     {
                         Id = toolCall.Id,
@@ -415,7 +447,11 @@ public class LMStudioProvider : IAIProvider
 
                 if (verbose)
                 {
-                    Console.WriteLine($"🔧 Received {aiResponse.ToolCalls.Count} tool calls from model");
+                    Console.WriteLine($"🔧 LMStudio - Converted {aiResponse.ToolCalls.Count} tool calls");
+                    foreach (var tc in aiResponse.ToolCalls)
+                    {
+                        Console.WriteLine($"   - Converted ToolCall: Name='{tc.Name}', Id='{tc.Id}'");
+                    }
                 }
             }
 

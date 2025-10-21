@@ -127,6 +127,14 @@ IMPORTANT: Always provide meaningful content in 'new_str' - never leave it empty
                 {
                     throw new ArgumentException("When creating a new file, 'new_str' cannot be empty. Please provide the content you want to write to the file.");
                 }
+                
+                // Create directory if it doesn't exist
+                var directory = Path.GetDirectoryName(editFileInput.Path);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+                
                 Console.WriteLine($"Creating new file: {editFileInput.Path}");
                 await File.WriteAllTextAsync(editFileInput.Path, editFileInput.NewStr);
                 return $"Successfully created file '{editFileInput.Path}' with {editFileInput.NewStr.Length} characters of content.";

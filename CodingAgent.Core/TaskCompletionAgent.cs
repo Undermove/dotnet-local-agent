@@ -337,7 +337,23 @@ Focus on meeting all the Definition of Done criteria.";
         };
 
         var response = await provider.SendMessageWithToolsAsync(conversation, 
-            ToolConverter.ConvertToOpenAITools(tools).Cast<object>().ToList(), verbose);
+            ToolConverter.ConvertToOpenAITools(tools, verbose).Cast<object>().ToList(), verbose);
+
+        if (verbose)
+        {
+            Console.WriteLine($"🔍 ExecuteSubtaskAsync - Response received:");
+            Console.WriteLine($"   TextContent: {response.TextContent}");
+            Console.WriteLine($"   HasToolCalls: {response.HasToolCalls}");
+            Console.WriteLine($"   ToolCalls.Count: {response.ToolCalls.Count}");
+            if (response.ToolCalls.Count > 0)
+            {
+                foreach (var tc in response.ToolCalls)
+                {
+                    Console.WriteLine($"   - ToolCall: Name='{tc.Name}', Id='{tc.Id}', Args='{tc.Arguments}'");
+                }
+            }
+            Console.WriteLine($"   Available tools in list: {string.Join(", ", tools.Select(t => $"'{t.Name}'"))}");
+        }
 
         var actionResult = new ActionResult
         {
@@ -355,17 +371,40 @@ Focus on meeting all the Definition of Done criteria.";
             {
                 try
                 {
+                    if (verbose)
+                    {
+                        Console.WriteLine($"🔧 Looking for tool: '{toolCall.Name}'");
+                    }
+                    
                     var tool = tools.FirstOrDefault(t => t.Name == toolCall.Name);
+                    
                     if (tool != null)
                     {
+                        if (verbose)
+                        {
+                            Console.WriteLine($"✅ Found tool: '{toolCall.Name}', executing...");
+                        }
                         var result = await tool.ExecuteAsync(toolCall.Arguments);
                         toolResults.Add($"{toolCall.Name}: {result}");
+                    }
+                    else
+                    {
+                        if (verbose)
+                        {
+                            Console.WriteLine($"❌ Tool NOT found: '{toolCall.Name}'. Available tools: {string.Join(", ", tools.Select(t => t.Name))}");
+                        }
+                        toolResults.Add($"{toolCall.Name}: Error - Tool not found");
+                        actionResult.Success = false;
                     }
                 }
                 catch (Exception ex)
                 {
                     toolResults.Add($"{toolCall.Name}: Error - {ex.Message}");
                     actionResult.Success = false;
+                    if (verbose)
+                    {
+                        Console.WriteLine($"❌ Exception executing tool {toolCall.Name}: {ex.Message}");
+                    }
                 }
             }
             actionResult.ToolResults = toolResults;
@@ -854,38 +893,52 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
     {
         var toolDescriptions = tools.Select(tool => 
             $"- {tool.Name}: {tool.Description}").ToList();
+        var toolList = string.Join(Environment.NewLine, toolDescriptions);
 
-        return $@"You are a task execution specialist. Your job is to complete specific subtasks using available tools.
-
-AVAILABLE TOOLS:
-{string.Join("\n", toolDescriptions)}
-
-EXECUTION PRINCIPLES:
-1. Read and understand the subtask carefully before acting
-2. Always start by exploring the codebase to understand existing implementations
-3. For research/understanding tasks, use available tools to gather information
-4. For implementation tasks, use tools to modify code and files
-5. Be thorough and check your work
-6. Focus on meeting all Definition of Done criteria
-7. If something fails, try alternative approaches
-8. Provide clear feedback on what was accomplished
-
-METHODICAL APPROACH:
-When working on tasks that extend existing functionality:
-1. EXPLORE: Use list_files to find relevant files and directories
-2. ANALYZE: Use read_file to understand existing code patterns
-3. RESEARCH: Look up new requirements or formats if needed
-4. IMPLEMENT: Make targeted changes using edit_file
-5. VALIDATE: Test your changes
-
-IMPORTANT NOTES:
-- Always use list_files and read_file to explore the codebase first
-- Look for patterns in existing code before implementing new features
-- Don't assume files exist - check first with list_files or read_file
-- If linting fails due to warnings, focus on the core functionality first
-- When adding support for new file formats, find how similar formats are currently handled
-
-Always use tools when appropriate - don't just provide instructions or explanations.";
+        return $"You are a task execution specialist. Your job is to complete specific subtasks using available tools.{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
+               $"AVAILABLE TOOLS:{Environment.NewLine}" +
+               $"{toolList}{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
+               $"EXECUTION PRINCIPLES:{Environment.NewLine}" +
+               $"1. Read and understand the subtask carefully before acting{Environment.NewLine}" +
+               $"2. Choose the RIGHT TOOL FOR THE JOB based on what needs to be accomplished{Environment.NewLine}" +
+               $"3. For research/understanding tasks, use appropriate tools to gather information{Environment.NewLine}" +
+               $"4. For implementation tasks, use tools to modify code and files{Environment.NewLine}" +
+               $"5. For system commands, use bash tool{Environment.NewLine}" +
+               $"6. Be thorough and check your work{Environment.NewLine}" +
+               $"7. Focus on meeting all Definition of Done criteria{Environment.NewLine}" +
+               $"8. If something fails, try alternative approaches{Environment.NewLine}" +
+               $"9. Provide clear feedback on what was accomplished{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
+               $"TOOL SELECTION GUIDELINES:{Environment.NewLine}" +
+               $"- list_files: Use ONLY when you need to discover what files exist or explore directory structure{Environment.NewLine}" +
+               $"- read_file: Use when you need to examine the contents of a specific file{Environment.NewLine}" +
+               $"- edit_file: Use when you need to create or modify code/text files{Environment.NewLine}" +
+               $"- bash: Use for running shell commands, building, or testing{Environment.NewLine}" +
+               $"- Other tools: Use as needed for validation or specific operations{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
+               $"CRITICAL - AVOID UNNECESSARY TOOL CALLS:{Environment.NewLine}" +
+               $"- Do not use list_files just to explore - use it only when you genuinely need to know what files exist{Environment.NewLine}" +
+               $"- Do not repeatedly use the same tool - use it once to get information, then use other tools{Environment.NewLine}" +
+               $"- Each tool call should have a specific purpose and move the task forward{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
+               $"METHODICAL APPROACH FOR CODE IMPLEMENTATION:{Environment.NewLine}" +
+               $"1. UNDERSTAND THE TASK: Read the definition of done carefully{Environment.NewLine}" +
+               $"2. EXECUTE: Use the most appropriate tool for each step (edit_file, bash, read_file, etc.){Environment.NewLine}" +
+               $"3. VALIDATE: Check that requirements are met{Environment.NewLine}" +
+               $"4. USE TOOLS STRATEGICALLY: Not all tasks require exploration - some need direct action{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
+               $"IMPORTANT NOTES:{Environment.NewLine}" +
+               $"- Do not assume files exist - use read_file or bash to check, then use appropriate tool{Environment.NewLine}" +
+               $"- If you know what file you need to edit, use edit_file directly{Environment.NewLine}" +
+               $"- When creating new functionality, use edit_file to create/modify files as needed{Environment.NewLine}" +
+               $"- Use bash for compilation, testing, or running commands{Environment.NewLine}" +
+               $"- When adding features, look at existing similar code patterns to understand the approach{Environment.NewLine}" +
+               $"- Vary your tool usage based on actual task requirements{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
+               $"Always use tools actively to complete the task - do not just provide instructions or explanations.{Environment.NewLine}" +
+               $"Pick the right tool for each specific action you need to take.";
     }
 }
 
