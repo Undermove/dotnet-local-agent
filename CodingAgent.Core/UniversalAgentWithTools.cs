@@ -1,23 +1,13 @@
-using System.Text.Json;
 using OpenAI.Chat;
 
 namespace CodingAgent.Core;
 
-public class UniversalAgentWithTools
+public class UniversalAgentWithTools(
+    IAIProvider provider,
+    Func<string> getUserMessage,
+    List<ToolDefinition> tools,
+    bool verbose)
 {
-    private readonly IAIProvider _provider;
-    private readonly Func<string> _getUserMessage;
-    private readonly List<ToolDefinition> _tools;
-    private readonly bool _verbose;
-
-    public UniversalAgentWithTools(IAIProvider provider, Func<string> getUserMessage, List<ToolDefinition> tools, bool verbose)
-    {
-        _provider = provider;
-        _getUserMessage = getUserMessage;
-        _tools = tools;
-        _verbose = verbose;
-    }
-
     public async Task RunAsync()
     {
         var conversation = new List<ChatMessage>();
@@ -26,7 +16,7 @@ public class UniversalAgentWithTools
         var systemPrompt = GenerateSystemPrompt();
         conversation.Add(new SystemChatMessage(systemPrompt));
 
-        if (_verbose)
+        if (verbose)
         {
             Console.WriteLine("Starting chat session with universal tools support");
             Console.WriteLine($"System prompt length: {systemPrompt.Length} characters");
@@ -36,11 +26,11 @@ public class UniversalAgentWithTools
         while (true)
         {
             Console.Write("\u001b[94mYou\u001b[0m: ");
-            var userInput = _getUserMessage();
+            var userInput = getUserMessage();
             
             if (userInput == null)
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine("User input ended, breaking from chat loop");
                 }
@@ -50,21 +40,21 @@ public class UniversalAgentWithTools
             // Skip empty messages
             if (string.IsNullOrWhiteSpace(userInput))
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine("Skipping empty message");
                 }
                 continue;
             }
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"User input received: \"{userInput}\"");
             }
 
             conversation.Add(new UserChatMessage(userInput));
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"Sending message to AI, conversation length: {conversation.Count}");
             }
@@ -90,7 +80,7 @@ public class UniversalAgentWithTools
             }
         }
 
-        if (_verbose)
+        if (verbose)
         {
             Console.WriteLine("Chat session ended");
         }
@@ -102,7 +92,7 @@ public class UniversalAgentWithTools
 
         foreach (var toolCall in toolCalls)
         {
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"Tool call detected: {toolCall.Name} with arguments: {toolCall.Arguments}");
             }
@@ -113,11 +103,11 @@ public class UniversalAgentWithTools
             Exception toolError = null;
             bool toolFound = false;
 
-            foreach (var tool in _tools)
+            foreach (var tool in tools)
             {
                 if (tool.Name == toolCall.Name)
                 {
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"Executing tool: {tool.Name}");
                     }
@@ -125,7 +115,7 @@ public class UniversalAgentWithTools
                     {
                         toolResult = await tool.ExecuteAsync(toolCall.Arguments);
                         Console.WriteLine($"\u001b[92mresult\u001b[0m: {toolResult}");
-                        if (_verbose)
+                        if (verbose)
                         {
                             Console.WriteLine($"Tool execution successful, result length: {toolResult.Length} chars");
                         }
@@ -134,7 +124,7 @@ public class UniversalAgentWithTools
                     {
                         toolError = ex;
                         Console.WriteLine($"\u001b[91merror\u001b[0m: {ex.Message}");
-                        if (_verbose)
+                        if (verbose)
                         {
                             Console.WriteLine($"Tool execution failed: {ex}");
                         }
@@ -178,22 +168,22 @@ public class UniversalAgentWithTools
     private async Task<AIResponse?> RunInferenceAsync(List<ChatMessage> conversation)
     {
         // Конвертируем наши ToolDefinition в ChatTool для OpenAI SDK
-        var openAITools = ToolConverter.ConvertToOpenAITools(_tools);
+        var openAITools = ToolConverter.ConvertToOpenAITools(tools);
 
-        if (_verbose)
+        if (verbose)
         {
             Console.WriteLine($"Making API call with {openAITools.Count} tools");
         }
 
         try
         {
-            var response = await _provider.SendMessageWithToolsAsync(conversation, openAITools.Cast<object>().ToList(), _verbose);
+            var response = await provider.SendMessageWithToolsAsync(conversation, openAITools.Cast<object>().ToList(), verbose);
             return response;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error during inference: {ex.Message}");
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"Full error: {ex}");
             }
@@ -203,7 +193,7 @@ public class UniversalAgentWithTools
 
     private string GenerateSystemPrompt()
     {
-        var toolDescriptions = _tools.Select(tool => 
+        var toolDescriptions = tools.Select(tool => 
             $"- {tool.Name}: {tool.Description}").ToList();
 
         return $@"You are a helpful AI assistant with access to the following tools:

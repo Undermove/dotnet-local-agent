@@ -1,10 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Threading.Tasks;
 using Anthropic.SDK;
 using Newtonsoft.Json;
-using NJsonSchema.Generation;
 using static CodingAgent.Core.SchemaGenerator;
 
 namespace CodingAgent.Core

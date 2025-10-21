@@ -1,12 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using Anthropic.SDK;
-using Anthropic.SDK.Messaging;
 using Newtonsoft.Json;
-using NJsonSchema.Generation;
 using static CodingAgent.Core.SchemaGenerator;
 
 namespace CodingAgent.Core

@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading.Tasks;
 using OpenAI.Chat;
 
 namespace CodingAgent.Core
@@ -12,20 +7,13 @@ namespace CodingAgent.Core
     /// <summary>
     /// Агент для доведения сложных задач до конца с использованием цикла TOTE (Test-Operate-Test-Exit)
     /// </summary>
-    public class TaskCompletionAgent
+    public class TaskCompletionAgent(
+        IAIProvider provider,
+        List<ToolDefinition> tools,
+        bool verbose = false,
+        TaskCompletionConfig? config = null)
     {
-        private readonly IAIProvider _provider;
-        private readonly List<ToolDefinition> _tools;
-        private readonly bool _verbose;
-        private readonly TaskCompletionConfig _config;
-        
-        public TaskCompletionAgent(IAIProvider provider, List<ToolDefinition> tools, bool verbose = false, TaskCompletionConfig? config = null)
-        {
-            _provider = provider;
-            _tools = tools;
-            _verbose = verbose;
-            _config = config ?? new TaskCompletionConfig();
-        }
+        private readonly TaskCompletionConfig _config = config ?? new TaskCompletionConfig();
 
         /// <summary>
         /// Выполняет задачу до полного завершения
@@ -39,7 +27,7 @@ namespace CodingAgent.Core
                 Constraints = constraints ?? new List<string>()
             };
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"🎯 Starting task completion: {taskDescription}");
                 Console.WriteLine($"📋 Constraints: {string.Join(", ", result.Constraints)}");
@@ -51,7 +39,7 @@ namespace CodingAgent.Core
                 var plan = await CreateTaskPlanAsync(taskDescription, result.Constraints);
                 result.Plan = plan;
                 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"📝 Created plan with {plan.Subtasks.Count} subtasks");
                     foreach (var subtask in plan.Subtasks)
@@ -63,7 +51,7 @@ namespace CodingAgent.Core
                 // Основной цикл TOTE
                 var iteration = 0;
                 var isComplete = IsTaskComplete(plan);
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"🔍 Task complete check: {isComplete}");
                 }
@@ -73,7 +61,7 @@ namespace CodingAgent.Core
                     iteration++;
                     var iterationResult = new IterationResult { IterationNumber = iteration };
                     
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"\n🔄 Iteration {iteration}/{_config.MaxIterations}");
                     }
@@ -88,7 +76,7 @@ namespace CodingAgent.Core
                         var nextSubtask = SelectNextSubtask(plan);
                         if (nextSubtask == null)
                         {
-                            if (_verbose)
+                            if (verbose)
                             {
                                 Console.WriteLine("✅ No more subtasks to execute");
                             }
@@ -97,7 +85,7 @@ namespace CodingAgent.Core
                         
                         iterationResult.SelectedSubtask = nextSubtask;
                         
-                        if (_verbose)
+                        if (verbose)
                         {
                             Console.WriteLine($"🎯 Selected subtask: {nextSubtask.Description}");
                         }
@@ -119,7 +107,7 @@ namespace CodingAgent.Core
                         
                         iterationResult.Success = critique.IsSuccessful;
                         
-                        if (_verbose)
+                        if (verbose)
                         {
                             Console.WriteLine($"📊 Iteration {iteration} result: {(iterationResult.Success ? "✅ Success" : "❌ Failed")}");
                             if (!string.IsNullOrEmpty(critique.Feedback))
@@ -133,7 +121,7 @@ namespace CodingAgent.Core
                         iterationResult.Error = ex.Message;
                         iterationResult.Success = false;
                         
-                        if (_verbose)
+                        if (verbose)
                         {
                             Console.WriteLine($"❌ Iteration {iteration} failed: {ex.Message}");
                         }
@@ -158,7 +146,7 @@ namespace CodingAgent.Core
                 result.EndTime = DateTime.UtcNow;
                 result.TotalIterations = iteration;
                 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"\n🏁 Task completion finished: {(result.Success ? "✅ Success" : "❌ Failed")}");
                     Console.WriteLine($"⏱️ Duration: {result.Duration.TotalSeconds:F1}s, Iterations: {result.TotalIterations}");
@@ -172,7 +160,7 @@ namespace CodingAgent.Core
                 result.Error = ex.Message;
                 result.EndTime = DateTime.UtcNow;
                 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"💥 Task completion failed: {ex.Message}");
                 }
@@ -189,7 +177,7 @@ TASK: {taskDescription}
 
 CONSTRAINTS: {string.Join(", ", constraints)}
 
-AVAILABLE TOOLS: {string.Join(", ", _tools.Select(t => t.Name))}
+AVAILABLE TOOLS: {string.Join(", ", tools.Select(t => t.Name))}
 
 CONTEXT: This is a C# .NET project. When planning tasks:
 - Use list_files and read_file to explore the codebase and understand existing implementations
@@ -234,14 +222,14 @@ Respond with a JSON structure like this:
                 new UserChatMessage(planningPrompt)
             };
 
-            var response = await _provider.SendMessageWithToolsAsync(conversation, null, _verbose);
+            var response = await provider.SendMessageWithToolsAsync(conversation, null, verbose);
             
             if (string.IsNullOrEmpty(response.TextContent))
             {
                 throw new InvalidOperationException("Failed to generate task plan");
             }
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"🔍 Raw AI response: {response.TextContent}");
             }
@@ -251,7 +239,7 @@ Respond with a JSON structure like this:
                 // Очищаем JSON от markdown блоков кода
                 var cleanJson = ExtractJsonFromMarkdown(response.TextContent);
                 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"🔍 Cleaned JSON: {cleanJson}");
                 }
@@ -263,7 +251,7 @@ Respond with a JSON structure like this:
                     throw new InvalidOperationException("Failed to deserialize task plan: planData is null");
                 }
                 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"🔍 Deserialized plan data with {planData.Subtasks.Count} subtasks");
                 }
@@ -348,8 +336,8 @@ Focus on meeting all the Definition of Done criteria.";
                 new UserChatMessage(executionPrompt)
             };
 
-            var response = await _provider.SendMessageWithToolsAsync(conversation, 
-                ToolConverter.ConvertToOpenAITools(_tools).Cast<object>().ToList(), _verbose);
+            var response = await provider.SendMessageWithToolsAsync(conversation, 
+                ToolConverter.ConvertToOpenAITools(tools).Cast<object>().ToList(), verbose);
 
             var actionResult = new ActionResult
             {
@@ -367,7 +355,7 @@ Focus on meeting all the Definition of Done criteria.";
                 {
                     try
                     {
-                        var tool = _tools.FirstOrDefault(t => t.Name == toolCall.Name);
+                        var tool = tools.FirstOrDefault(t => t.Name == toolCall.Name);
                         if (tool != null)
                         {
                             var result = await tool.ExecuteAsync(toolCall.Arguments);
@@ -405,7 +393,7 @@ Focus on meeting all the Definition of Done criteria.";
             {
                 var projectFile = projectFiles.First();
                 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"🔍 Running validation checks on {projectFile}");
                 }
@@ -512,7 +500,7 @@ Focus on meeting all the Definition of Done criteria.";
             }
             catch (Exception ex)
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"Error finding project files: {ex.Message}");
                 }
@@ -606,14 +594,14 @@ Focus on meeting all the Definition of Done criteria.";
                 {
                     subtask.Status = SubtaskStatus.Pending; // Попробуем еще раз
                     
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"🔄 Retrying subtask {subtask.Id} (attempt {subtask.AttemptCount + 1}/{_config.MaxSubtaskAttempts})");
                     }
                 }
                 else
                 {
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"❌ Subtask {subtask.Id} failed after {subtask.AttemptCount} attempts");
                     }
@@ -629,7 +617,7 @@ Focus on meeting all the Definition of Done criteria.";
         /// </summary>
         private async Task AdaptPlanAsync(TaskPlan plan, Subtask failedSubtask, CritiqueResult critique)
         {
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"🔄 Attempting to adapt plan due to failed subtask: {failedSubtask.Id}");
             }
@@ -650,7 +638,7 @@ CURRENT PLAN CONTEXT:
 - Failed: {plan.Subtasks.Count(s => s.Status == SubtaskStatus.Failed)}
 - Pending: {plan.Subtasks.Count(s => s.Status == SubtaskStatus.Pending)}
 
-AVAILABLE TOOLS: {string.Join(", ", _tools.Select(t => t.Name))}
+AVAILABLE TOOLS: {string.Join(", ", tools.Select(t => t.Name))}
 
 Please analyze the failure and suggest alternative approaches. Consider:
 1. Breaking down the failed subtask into smaller, more specific steps
@@ -681,7 +669,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
                     new UserChatMessage(adaptationPrompt)
                 };
 
-                var response = await _provider.SendMessageWithToolsAsync(conversation, null, _verbose);
+                var response = await provider.SendMessageWithToolsAsync(conversation, null, verbose);
                 
                 if (!string.IsNullOrEmpty(response.TextContent))
                 {
@@ -696,7 +684,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
             }
             catch (Exception ex)
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"⚠️ Failed to adapt plan: {ex.Message}");
                 }
@@ -708,7 +696,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
         /// </summary>
         private async Task ApplyPlanAdaptationAsync(TaskPlan plan, Subtask failedSubtask, PlanAdaptationData adaptation)
         {
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"🔧 Applying plan adaptation: {adaptation.AdaptationStrategy}");
                 Console.WriteLine($"💡 Reasoning: {adaptation.Reasoning}");
@@ -730,7 +718,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
                 case "skip":
                     // Пропускаем провалившуюся подзадачу и продолжаем
                     failedSubtask.Status = SubtaskStatus.Skipped;
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"⏭️ Skipping subtask {failedSubtask.Id} as recommended");
                     }
@@ -758,7 +746,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
 
             plan.Subtasks.AddRange(newSubtasks);
             
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"➕ Added {newSubtasks.Count} new adapted subtasks:");
                 foreach (var subtask in newSubtasks)
@@ -770,7 +758,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
 
         private async Task HandleIterationErrorAsync(TaskPlan plan, Exception error)
         {
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"🔧 Handling iteration error: {error.Message}");
             }
@@ -833,7 +821,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
             // Проверяем различные условия остановки
             if (iteration >= _config.MaxIterations)
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"⏰ Stopping: Maximum iterations ({_config.MaxIterations}) reached");
                 }
@@ -842,7 +830,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
 
             if (result.Duration.TotalMinutes > _config.MaxExecutionTimeMinutes)
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"⏰ Stopping: Maximum execution time ({_config.MaxExecutionTimeMinutes} min) reached");
                 }
@@ -852,7 +840,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
             var failedSubtasks = result.Plan?.Subtasks.Count(s => s.Status == SubtaskStatus.Failed) ?? 0;
             if (failedSubtasks > _config.MaxFailedSubtasks)
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"❌ Stopping: Too many failed subtasks ({failedSubtasks})");
                 }
@@ -864,7 +852,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
 
         private string GenerateExecutionSystemPrompt()
         {
-            var toolDescriptions = _tools.Select(tool => 
+            var toolDescriptions = tools.Select(tool => 
                 $"- {tool.Name}: {tool.Description}").ToList();
 
             return $@"You are a task execution specialist. Your job is to complete specific subtasks using available tools.

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
 using OpenAI;
@@ -34,23 +33,16 @@ public class ToolCall
     public string Arguments { get; set; } = "";
 }
 
-public class AnthropicProvider : IAIProvider
+public class AnthropicProvider(string apiKey, string model = "claude-3-5-sonnet-20241022") : IAIProvider
 {
-    private readonly AnthropicClient _client;
-    private readonly string _model;
-
-    public AnthropicProvider(string apiKey, string model = "claude-3-5-sonnet-20241022")
-    {
-        _client = new AnthropicClient(apiKey);
-        _model = model;
-    }
+    private readonly AnthropicClient _client = new(apiKey);
 
     public async Task<string> SendMessageAsync(string message, List<object>? tools = null, bool verbose = false)
     {
         var messageParams = new MessageParameters
         {
             Messages = [new Message(RoleType.User, message)],
-            Model = _model,
+            Model = model,
             MaxTokens = 4096,
             Stream = false
         };
@@ -62,7 +54,7 @@ public class AnthropicProvider : IAIProvider
 
         if (verbose)
         {
-            Console.WriteLine($"🤖 Sending message to Claude ({_model})...");
+            Console.WriteLine($"🤖 Sending message to Claude ({model})...");
         }
 
         var response = await _client.Messages.GetClaudeMessageAsync(messageParams);
@@ -89,16 +81,9 @@ public class AnthropicProvider : IAIProvider
     }
 }
 
-public class OpenAIProvider : IAIProvider
+public class OpenAIProvider(string apiKey, string model = "gpt-4") : IAIProvider
 {
-    private readonly OpenAIClient _client;
-    private readonly string _model;
-
-    public OpenAIProvider(string apiKey, string model = "gpt-4")
-    {
-        _client = new OpenAIClient(new ApiKeyCredential(apiKey));
-        _model = model;
-    }
+    private readonly OpenAIClient _client = new(new ApiKeyCredential(apiKey));
 
     public async Task<string> SendMessageAsync(string message, List<object>? tools = null, bool verbose = false)
     {
@@ -109,7 +94,7 @@ public class OpenAIProvider : IAIProvider
 
         if (verbose)
         {
-            Console.WriteLine($"🤖 Sending message to OpenAI ({_model})...");
+            Console.WriteLine($"🤖 Sending message to OpenAI ({model})...");
             if (tools != null && tools.Count > 0)
             {
                 Console.WriteLine($"📋 Sending {tools.Count} tools to model");
@@ -118,7 +103,7 @@ public class OpenAIProvider : IAIProvider
 
         try
         {
-            var chatClient = _client.GetChatClient(_model);
+            var chatClient = _client.GetChatClient(model);
             var options = new ChatCompletionOptions
             {
             };
@@ -160,7 +145,7 @@ public class OpenAIProvider : IAIProvider
     {
         if (verbose)
         {
-            Console.WriteLine($"🤖 Sending {messages.Count} messages to OpenAI ({_model})...");
+            Console.WriteLine($"🤖 Sending {messages.Count} messages to OpenAI ({model})...");
             if (tools != null && tools.Count > 0)
             {
                 Console.WriteLine($"📋 Sending {tools.Count} tools to model");
@@ -169,7 +154,7 @@ public class OpenAIProvider : IAIProvider
 
         try
         {
-            var chatClient = _client.GetChatClient(_model);
+            var chatClient = _client.GetChatClient(model);
             var options = new ChatCompletionOptions
             {
             };

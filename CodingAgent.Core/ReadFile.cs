@@ -1,13 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
 using Newtonsoft.Json;
-using NJsonSchema;
-using NJsonSchema.Generation;
 using static CodingAgent.Core.SchemaGenerator;
 
 namespace CodingAgent.Core
@@ -80,26 +73,17 @@ namespace CodingAgent.Core
         }
     }
 
-    public class AgentWithTools
+    public class AgentWithTools(
+        AnthropicClient client,
+        Func<string> getUserMessage,
+        List<ToolDefinition> tools,
+        bool verbose)
     {
-        private readonly AnthropicClient _client;
-        private readonly Func<string> _getUserMessage;
-        private readonly List<ToolDefinition> _tools;
-        private readonly bool _verbose;
-
-        public AgentWithTools(AnthropicClient client, Func<string> getUserMessage, List<ToolDefinition> tools, bool verbose)
-        {
-            _client = client;
-            _getUserMessage = getUserMessage;
-            _tools = tools;
-            _verbose = verbose;
-        }
-
         public async Task RunAsync()
         {
             var conversation = new List<Message>();
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine("Starting chat session with tools enabled");
             }
@@ -108,11 +92,11 @@ namespace CodingAgent.Core
             while (true)
             {
                 Console.Write("\u001b[94mYou\u001b[0m: ");
-                var userInput = _getUserMessage();
+                var userInput = getUserMessage();
                 
                 if (userInput == null)
                 {
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine("User input ended, breaking from chat loop");
                     }
@@ -122,14 +106,14 @@ namespace CodingAgent.Core
                 // Skip empty messages
                 if (string.IsNullOrWhiteSpace(userInput))
                 {
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine("Skipping empty message");
                     }
                     continue;
                 }
 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"User input received: \"{userInput}\"");
                 }
@@ -141,7 +125,7 @@ namespace CodingAgent.Core
                 };
                 conversation.Add(userMessage);
 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"Sending message to Claude, conversation length: {conversation.Count}");
                 }
@@ -161,7 +145,7 @@ namespace CodingAgent.Core
                     var toolResults = new List<ToolResultContent>();
                     var hasToolUse = false;
 
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"Processing {response.Content.Count} content blocks from Claude");
                     }
@@ -175,7 +159,7 @@ namespace CodingAgent.Core
                         else if (content is ToolUseContent toolUse)
                         {
                             hasToolUse = true;
-                            if (_verbose)
+                            if (verbose)
                             {
                                 Console.WriteLine($"Tool use detected: {toolUse.Name} with input: {toolUse.Input}");
                             }
@@ -186,11 +170,11 @@ namespace CodingAgent.Core
                             Exception toolError = null;
                             bool toolFound = false;
 
-                            foreach (var tool in _tools)
+                            foreach (var tool in tools)
                             {
                                 if (tool.Name == toolUse.Name)
                                 {
-                                    if (_verbose)
+                                    if (verbose)
                                     {
                                         Console.WriteLine($"Executing tool: {tool.Name}");
                                     }
@@ -198,7 +182,7 @@ namespace CodingAgent.Core
                                     {
                                         toolResult = await tool.ExecuteAsync(toolUse.Input.ToString());
                                         Console.WriteLine($"\u001b[92mresult\u001b[0m: {toolResult}");
-                                        if (_verbose)
+                                        if (verbose)
                                         {
                                             Console.WriteLine($"Tool execution successful, result length: {toolResult.Length} chars");
                                         }
@@ -207,7 +191,7 @@ namespace CodingAgent.Core
                                     {
                                         toolError = ex;
                                         Console.WriteLine($"\u001b[91merror\u001b[0m: {ex.Message}");
-                                        if (_verbose)
+                                        if (verbose)
                                         {
                                             Console.WriteLine($"Tool execution failed: {ex}");
                                         }
@@ -252,7 +236,7 @@ namespace CodingAgent.Core
                     }
 
                     // Send all tool results back and get Claude's response
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"Sending {toolResults.Count} tool results back to Claude");
                     }
@@ -273,7 +257,7 @@ namespace CodingAgent.Core
                     }
                     conversation.Add(response);
 
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"Received followup response with {response.Content.Count} content blocks");
                     }
@@ -282,7 +266,7 @@ namespace CodingAgent.Core
                 }
             }
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine("Chat session ended");
             }
@@ -291,7 +275,7 @@ namespace CodingAgent.Core
         private async Task<Message> RunInferenceAsync(List<Message> conversation)
         {
             var anthropicTools = new List<Anthropic.SDK.Common.Tool>();
-            foreach (var tool in _tools)
+            foreach (var tool in tools)
             {
                 var function = new Anthropic.SDK.Common.Function(
                     tool.Name,
@@ -301,7 +285,7 @@ namespace CodingAgent.Core
                 anthropicTools.Add(new Anthropic.SDK.Common.Tool(function));
             }
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine($"Making API call to Claude with model: claude-3-sonnet-20240229 and {anthropicTools.Count} tools");
             }
@@ -320,9 +304,9 @@ namespace CodingAgent.Core
                     System = new List<SystemMessage> { new SystemMessage(systemPrompt) }
                 };
 
-                var response = await _client.Messages.GetClaudeMessageAsync(parameters);
+                var response = await client.Messages.GetClaudeMessageAsync(parameters);
 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine("API call successful, response received");
                 }
@@ -335,7 +319,7 @@ namespace CodingAgent.Core
             }
             catch (Exception ex)
             {
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"API call failed: {ex.Message}");
                 }
@@ -350,7 +334,7 @@ namespace CodingAgent.Core
 AVAILABLE TOOLS:
 ";
 
-            foreach (var tool in _tools)
+            foreach (var tool in tools)
             {
                 prompt += $"- {tool.Name}: {tool.Description}\n";
             }

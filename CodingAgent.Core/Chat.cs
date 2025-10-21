@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using Anthropic.SDK;
-using Anthropic.SDK.Messaging;
-
 namespace CodingAgent.Core
 {
     public class ChatProgram
@@ -45,22 +39,11 @@ namespace CodingAgent.Core
         }
     }
 
-    public class Agent
+    public class Agent(IAIProvider provider, Func<string> getUserMessage, bool verbose)
     {
-        private readonly IAIProvider _provider;
-        private readonly Func<string> _getUserMessage;
-        private readonly bool _verbose;
-
-        public Agent(IAIProvider provider, Func<string> getUserMessage, bool verbose)
-        {
-            _provider = provider;
-            _getUserMessage = getUserMessage;
-            _verbose = verbose;
-        }
-
         public async Task RunAsync()
         {
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine("Starting chat session");
             }
@@ -69,11 +52,11 @@ namespace CodingAgent.Core
             while (true)
             {
                 Console.Write("\u001b[94mYou\u001b[0m: ");
-                var userInput = _getUserMessage();
+                var userInput = getUserMessage();
                 
                 if (userInput == null)
                 {
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine("User input ended, breaking from chat loop");
                     }
@@ -83,34 +66,34 @@ namespace CodingAgent.Core
                 // Skip empty messages
                 if (string.IsNullOrWhiteSpace(userInput))
                 {
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine("Skipping empty message");
                     }
                     continue;
                 }
 
-                if (_verbose)
+                if (verbose)
                 {
                     Console.WriteLine($"User input received: \"{userInput}\"");
                 }
 
                 try
                 {
-                    var response = await _provider.SendMessageAsync(userInput, null, _verbose);
+                    var response = await provider.SendMessageAsync(userInput, null, verbose);
                     Console.WriteLine($"\u001b[93mAI\u001b[0m: {response}");
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error: {ex.Message}");
-                    if (_verbose)
+                    if (verbose)
                     {
                         Console.WriteLine($"Stack trace: {ex.StackTrace}");
                     }
                 }
             }
 
-            if (_verbose)
+            if (verbose)
             {
                 Console.WriteLine("Chat session ended");
             }
