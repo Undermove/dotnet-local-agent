@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OpenAI.Chat;
@@ -91,7 +92,7 @@ public class TaskCompletionAgent(
                     }
 
                     // OPERATE: Выполняем действие
-                    var actionResult = await ExecuteSubtaskAsync(nextSubtask);
+                    var actionResult = await ExecuteSubtaskAsync(nextSubtask, result.Iterations);
                     iterationResult.ActionResult = actionResult;
                         
                     // OBSERVE: Запускаем проверки
@@ -281,7 +282,7 @@ Respond with a JSON structure like this:
         }
     }
 
-    private async Task<string> AssessCurrentStateAsync(TaskPlan plan)
+    private Task<string> AssessCurrentStateAsync(TaskPlan plan)
     {
         var completedTasks = plan.Subtasks.Where(s => s.Status == SubtaskStatus.Completed).Count();
         var totalTasks = plan.Subtasks.Count;
@@ -297,7 +298,7 @@ Respond with a JSON structure like this:
             state += $", {replacedTasks} replaced, {skippedTasks} skipped, {adaptedTasks} adapted";
         }
             
-        return state;
+        return Task.FromResult(state);
     }
 
     private Subtask? SelectNextSubtask(TaskPlan plan)
@@ -315,11 +316,56 @@ Respond with a JSON structure like this:
                 
         return availableSubtasks.FirstOrDefault();
     }
+    
+    private string BuildExecutionHistory(List<IterationResult> history)
+    {
+        if (history.Count == 0)
+        {
+            return "";
+        }
+        
+        var historyLines = new List<string> { "\nEXECUTION HISTORY (Previous steps for context):" };
+        
+        foreach (var iteration in history.TakeLast(3)) // Последние 3 итерации
+        {
+            if (iteration.SelectedSubtask != null)
+            {
+                var status = iteration.Success ? "✅ COMPLETED" : "❌ FAILED";
+                historyLines.Add($"\nStep {iteration.IterationNumber}: {iteration.SelectedSubtask.Description}");
+                historyLines.Add($"  Status: {status}");
+                
+                if (iteration.ActionResult != null)
+                {
+                    historyLines.Add($"  Tools used: {(iteration.ActionResult.ToolCallsExecuted > 0 ? $"{iteration.ActionResult.ToolCallsExecuted} tools" : "No tools")}");
+                    
+                    if (iteration.ActionResult.ToolResults.Any())
+                    {
+                        historyLines.Add($"  Results: {string.Join(" | ", iteration.ActionResult.ToolResults.Take(2))}");
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(iteration.ActionResult?.Response))
+                {
+                    var summary = iteration.ActionResult.Response.Length > 100 
+                        ? iteration.ActionResult.Response.Substring(0, 100) + "..."
+                        : iteration.ActionResult.Response;
+                    historyLines.Add($"  Summary: {summary}");
+                }
+            }
+        }
+        
+        historyLines.Add("\nUse this context to avoid repeating the same actions and to build on completed work.");
+        
+        return string.Join("\n", historyLines);
+    }
 
-    private async Task<ActionResult> ExecuteSubtaskAsync(Subtask subtask)
+    private async Task<ActionResult> ExecuteSubtaskAsync(Subtask subtask, List<IterationResult> executionHistory)
     {
         subtask.Status = SubtaskStatus.InProgress;
         subtask.StartTime = DateTime.UtcNow;
+        
+        // Построим историю предыдущих шагов
+        var historySection = BuildExecutionHistory(executionHistory);
             
         var executionPrompt = $@"Execute the following subtask:
 
@@ -328,7 +374,9 @@ DEFINITION OF DONE: {string.Join(", ", subtask.DefinitionOfDone)}
 REQUIRED TOOLS: {string.Join(", ", subtask.RequiredTools)}
 
 Use the available tools to complete this subtask. Be specific and thorough.
-Focus on meeting all the Definition of Done criteria.";
+Focus on meeting all the Definition of Done criteria.
+
+{historySection}";
 
         var conversation = new List<ChatMessage>
         {
@@ -336,37 +384,63 @@ Focus on meeting all the Definition of Done criteria.";
             new UserChatMessage(executionPrompt)
         };
 
-        var response = await provider.SendMessageWithToolsAsync(conversation, 
-            ToolConverter.ConvertToOpenAITools(tools, verbose).Cast<object>().ToList(), verbose);
-
-        if (verbose)
-        {
-            Console.WriteLine($"🔍 ExecuteSubtaskAsync - Response received:");
-            Console.WriteLine($"   TextContent: {response.TextContent}");
-            Console.WriteLine($"   HasToolCalls: {response.HasToolCalls}");
-            Console.WriteLine($"   ToolCalls.Count: {response.ToolCalls.Count}");
-            if (response.ToolCalls.Count > 0)
-            {
-                foreach (var tc in response.ToolCalls)
-                {
-                    Console.WriteLine($"   - ToolCall: Name='{tc.Name}', Id='{tc.Id}', Args='{tc.Arguments}'");
-                }
-            }
-            Console.WriteLine($"   Available tools in list: {string.Join(", ", tools.Select(t => $"'{t.Name}'"))}");
-        }
-
         var actionResult = new ActionResult
         {
             SubtaskId = subtask.Id,
-            Response = response.TextContent ?? "",
-            ToolCallsExecuted = response.ToolCalls.Count,
-            Success = !string.IsNullOrEmpty(response.TextContent) || response.HasToolCalls
+            Response = "",
+            ToolCallsExecuted = 0,
+            Success = false,
+            ToolResults = new List<string>()
         };
 
-        // Обрабатываем tool calls если есть
-        if (response.HasToolCalls)
+        // Цикл обработки: отправляем запрос, выполняем инструменты, отправляем результаты обратно
+        int maxToolLoops = 5; // Максимум 5 циклов инструментов
+        int toolLoopCount = 0;
+        
+        while (toolLoopCount < maxToolLoops)
         {
+            toolLoopCount++;
+            
+            var response = await provider.SendMessageWithToolsAsync(conversation, 
+                ToolConverter.ConvertToOpenAITools(tools, verbose).Cast<object>().ToList(), verbose);
+
+            if (verbose)
+            {
+                Console.WriteLine($"🔍 ExecuteSubtaskAsync - Response received (loop {toolLoopCount}):");
+                Console.WriteLine($"   TextContent: {response.TextContent}");
+                Console.WriteLine($"   HasToolCalls: {response.HasToolCalls}");
+                Console.WriteLine($"   ToolCalls.Count: {response.ToolCalls.Count}");
+                if (response.ToolCalls.Count > 0)
+                {
+                    foreach (var tc in response.ToolCalls)
+                    {
+                        Console.WriteLine($"   - ToolCall: Name='{tc.Name}', Id='{tc.Id}', Args='{tc.Arguments}'");
+                    }
+                }
+                Console.WriteLine($"   Available tools in list: {string.Join(", ", tools.Select(t => $"'{t.Name}'"))}");
+            }
+
+            // Сохраняем последний текстовый ответ
+            if (!string.IsNullOrEmpty(response.TextContent))
+            {
+                actionResult.Response = response.TextContent;
+            }
+
+            // Если нет инструментов - завершаем цикл
+            if (!response.HasToolCalls || response.ToolCalls.Count == 0)
+            {
+                actionResult.Success = !string.IsNullOrEmpty(response.TextContent) || actionResult.ToolCallsExecuted > 0;
+                if (verbose)
+                {
+                    Console.WriteLine($"✅ No more tool calls, completing execution loop");
+                }
+                break;
+            }
+
+            // Обрабатываем инструменты и собираем результаты
             var toolResults = new List<string>();
+            var assistantMessage = new StringBuilder();
+            
             foreach (var toolCall in response.ToolCalls)
             {
                 try
@@ -385,7 +459,10 @@ Focus on meeting all the Definition of Done criteria.";
                             Console.WriteLine($"✅ Found tool: '{toolCall.Name}', executing...");
                         }
                         var result = await tool.ExecuteAsync(toolCall.Arguments);
-                        toolResults.Add($"{toolCall.Name}: {result}");
+                        var resultSummary = $"{toolCall.Name}: {result}";
+                        toolResults.Add(resultSummary);
+                        actionResult.ToolResults.Add(resultSummary);
+                        actionResult.ToolCallsExecuted++;
                     }
                     else
                     {
@@ -393,13 +470,17 @@ Focus on meeting all the Definition of Done criteria.";
                         {
                             Console.WriteLine($"❌ Tool NOT found: '{toolCall.Name}'. Available tools: {string.Join(", ", tools.Select(t => t.Name))}");
                         }
-                        toolResults.Add($"{toolCall.Name}: Error - Tool not found");
+                        var errorSummary = $"{toolCall.Name}: Error - Tool not found";
+                        toolResults.Add(errorSummary);
+                        actionResult.ToolResults.Add(errorSummary);
                         actionResult.Success = false;
                     }
                 }
                 catch (Exception ex)
                 {
-                    toolResults.Add($"{toolCall.Name}: Error - {ex.Message}");
+                    var errorSummary = $"{toolCall.Name}: Error - {ex.Message}";
+                    toolResults.Add(errorSummary);
+                    actionResult.ToolResults.Add(errorSummary);
                     actionResult.Success = false;
                     if (verbose)
                     {
@@ -407,7 +488,36 @@ Focus on meeting all the Definition of Done criteria.";
                     }
                 }
             }
-            actionResult.ToolResults = toolResults;
+
+            // ВАЖНО: Отправляем результаты обратно в модель для анализа и следующего шага
+            var toolResultsMessage = string.Join("\n", toolResults);
+            if (verbose)
+            {
+                Console.WriteLine($"📝 Sending tool results back to model:\n{toolResultsMessage}");
+            }
+
+            // Добавляем результаты инструментов в контекст
+            var followUpMessage = $@"TOOL EXECUTION RESULTS:
+{toolResultsMessage}
+
+Based on these results, analyze what you found and decide on your next action:
+1. If the results show the task is complete, provide a summary of what was accomplished
+2. If you need more information, call the appropriate tools again to gather it
+3. If there was an error, explain what went wrong and try a different approach
+4. Otherwise, proceed to the next step to complete the subtask
+
+Remember: You must complete all Definition of Done criteria for the subtask.";
+
+            conversation.Add(new UserChatMessage(followUpMessage));
+        }
+
+        if (toolLoopCount >= maxToolLoops)
+        {
+            if (verbose)
+            {
+                Console.WriteLine($"⚠️ Reached maximum tool loops ({maxToolLoops}), stopping");
+            }
+            actionResult.Success = actionResult.ToolCallsExecuted > 0;
         }
 
         subtask.EndTime = DateTime.UtcNow;
@@ -548,19 +658,30 @@ Focus on meeting all the Definition of Done criteria.";
         return projectFiles;
     }
 
-    private async Task<CritiqueResult> CritiqueResultsAsync(ObservationResult observation, Subtask subtask)
+    private Task<CritiqueResult> CritiqueResultsAsync(ObservationResult observation, Subtask subtask)
     {
         var critique = new CritiqueResult();
-            
-        // Определяем тип задачи для более гибкой оценки
-        var isResearchTask = subtask.Description.ToLower().Contains("understand") || 
-                             subtask.Description.ToLower().Contains("read") ||
-                             subtask.Description.ToLower().Contains("research");
-            
+        var descLower = subtask.Description.ToLower();
+        
+        // Улучшенная классификация типа задачи
         var isImplementationTask = subtask.RequiredTools.Contains("edit_file") ||
-                                   subtask.Description.ToLower().Contains("update") ||
-                                   subtask.Description.ToLower().Contains("modify");
-            
+                                   subtask.RequiredTools.Contains("bash") ||
+                                   descLower.Contains("implement") ||
+                                   descLower.Contains("create") ||
+                                   descLower.Contains("update") ||
+                                   descLower.Contains("modify") ||
+                                   descLower.Contains("fix") ||
+                                   descLower.Contains("add");
+        
+        var isResearchTask = descLower.Contains("understand") || 
+                             descLower.Contains("research") ||
+                             descLower.Contains("analyze") ||
+                             descLower.Contains("investigate");
+        
+        // Специально для Implement/Create задач - требуем использования edit_file или bash
+        var requiresActualWork = descLower.Contains("implement") || descLower.Contains("create");
+        var hasActualWork = subtask.RequiredTools.Contains("edit_file") || subtask.RequiredTools.Contains("bash");
+        
         // Анализируем результаты в зависимости от типа задачи
         if (!observation.BuildSuccess)
         {
@@ -573,34 +694,64 @@ Focus on meeting all the Definition of Done criteria.";
             critique.Issues.Add("Tests failed");
             critique.ErrorType = ErrorType.Logic;
         }
-            
-        // Для задач исследования/понимания линтинг не критичен
+        
         if (!observation.LintPass && isImplementationTask)
         {
-            critique.Issues.Add("Linting failed");
+            critique.Issues.Add("Code style issues found");
             critique.ErrorType = ErrorType.Style;
         }
         else if (!observation.LintPass && !isImplementationTask)
         {
-            // Для исследовательских задач линтинг - это просто предупреждение
-            critique.Issues.Add("Linting warnings (non-critical for research tasks)");
+            critique.Issues.Add("Minor style issues (non-critical)");
         }
 
-        // Для исследовательских задач успех определяется по-другому
-        if (isResearchTask)
+        // Проверяем Definition of Done
+        var dodIssues = new List<string>();
+        foreach (var criterion in subtask.DefinitionOfDone)
+        {
+            var criterionLower = criterion.ToLower();
+            // Простая эвристика: если критерий требует "create", "implement", "add" - нужно использование edit_file
+            if ((criterionLower.Contains("create") || criterionLower.Contains("implement") || 
+                 criterionLower.Contains("add") || criterionLower.Contains("modify")) && !hasActualWork)
+            {
+                dodIssues.Add($"Definition of Done criterion not met: '{criterion}' requires code changes");
+            }
+        }
+        
+        if (dodIssues.Any())
+        {
+            critique.Issues.AddRange(dodIssues);
+            critique.ErrorType = ErrorType.Logic;
+        }
+        
+        // Для Implement/Create задач требуем реальной работы
+        if (requiresActualWork && !hasActualWork)
+        {
+            critique.Issues.Add("Implementation task but no edit_file or bash operations were performed");
+            critique.ErrorType = ErrorType.Logic;
+        }
+
+        // Определяем успешность выполнения
+        if (isResearchTask && !requiresActualWork)
         {
             // Исследовательская задача успешна, если нет критических ошибок сборки
-            critique.IsSuccessful = observation.BuildSuccess;
+            critique.IsSuccessful = observation.BuildSuccess && dodIssues.Count == 0;
+        }
+        else if (isImplementationTask)
+        {
+            // Для задач реализации требуем все проверки и отсутствие критических issues
+            var criticalIssues = critique.Issues.Where(i => !i.Contains("non-critical")).ToList();
+            critique.IsSuccessful = observation.BuildSuccess && observation.TestsPass && 
+                                   observation.LintPass && criticalIssues.Count == 0;
         }
         else
         {
-            // Для задач реализации требуем все проверки
-            critique.IsSuccessful = observation.BuildSuccess && observation.TestsPass && observation.LintPass;
+            critique.IsSuccessful = !critique.Issues.Any();
         }
             
         if (critique.IsSuccessful)
         {
-            critique.Feedback = "Subtask completed successfully";
+            critique.Feedback = "✅ Subtask completed successfully - all Definition of Done criteria met";
             subtask.Status = SubtaskStatus.Completed;
         }
         else
@@ -608,18 +759,18 @@ Focus on meeting all the Definition of Done criteria.";
             var criticalIssues = critique.Issues.Where(i => !i.Contains("non-critical")).ToList();
             if (criticalIssues.Any())
             {
-                critique.Feedback = $"Critical issues found: {string.Join(", ", criticalIssues)}";
+                critique.Feedback = $"❌ Critical issues: {string.Join("; ", criticalIssues)}";
                 subtask.Status = SubtaskStatus.Failed;
             }
             else
             {
-                critique.Feedback = "Subtask completed with minor warnings";
+                critique.Feedback = "⚠️ Subtask completed with minor warnings but meets DoD";
                 critique.IsSuccessful = true;
                 subtask.Status = SubtaskStatus.Completed;
             }
         }
 
-        return critique;
+        return Task.FromResult(critique);
     }
 
     private async Task UpdatePlanAsync(TaskPlan plan, CritiqueResult critique, Subtask subtask)
@@ -768,7 +919,7 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
     /// <summary>
     /// Добавляет новые подзадачи в план
     /// </summary>
-    private async Task AddNewSubtasksAsync(TaskPlan plan, List<SubtaskData> newSubtasksData, int basePriority)
+    private Task AddNewSubtasksAsync(TaskPlan plan, List<SubtaskData> newSubtasksData, int basePriority)
     {
         var newSubtasks = newSubtasksData.Select(s => new Subtask
         {
@@ -793,6 +944,8 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
                 Console.WriteLine($"  - {subtask.Id}: {subtask.Description}");
             }
         }
+        
+        return Task.CompletedTask;
     }
 
     private async Task HandleIterationErrorAsync(TaskPlan plan, Exception error)
@@ -900,6 +1053,14 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
                $"AVAILABLE TOOLS:{Environment.NewLine}" +
                $"{toolList}{Environment.NewLine}" +
                $"{Environment.NewLine}" +
+               $"CRITICAL - RESPOND TO TOOL RESULTS:{Environment.NewLine}" +
+               $"🔴 WHEN YOU RECEIVE TOOL RESULTS, YOU MUST ADAPT YOUR BEHAVIOR IMMEDIATELY{Environment.NewLine}" +
+               $"- If you tried to list_files and found 0 files, DO NOT list_files again - CREATE the files instead{Environment.NewLine}" +
+               $"- If you tried to read_file and it doesn't exist, use edit_file to CREATE it{Environment.NewLine}" +
+               $"- If a command failed, analyze the error and try a different approach{Environment.NewLine}" +
+               $"- If you got information showing the task is incomplete, continue working until it's done{Environment.NewLine}" +
+               $"- Never repeat the same tool call with the same parameters if you already got a result{Environment.NewLine}" +
+               $"{Environment.NewLine}" +
                $"EXECUTION PRINCIPLES:{Environment.NewLine}" +
                $"1. Read and understand the subtask carefully before acting{Environment.NewLine}" +
                $"2. Choose the RIGHT TOOL FOR THE JOB based on what needs to be accomplished{Environment.NewLine}" +
@@ -908,37 +1069,42 @@ Respond with a JSON structure containing new subtasks to replace or supplement t
                $"5. For system commands, use bash tool{Environment.NewLine}" +
                $"6. Be thorough and check your work{Environment.NewLine}" +
                $"7. Focus on meeting all Definition of Done criteria{Environment.NewLine}" +
-               $"8. If something fails, try alternative approaches{Environment.NewLine}" +
+               $"8. If something fails, try alternative approaches IMMEDIATELY{Environment.NewLine}" +
                $"9. Provide clear feedback on what was accomplished{Environment.NewLine}" +
                $"{Environment.NewLine}" +
                $"TOOL SELECTION GUIDELINES:{Environment.NewLine}" +
-               $"- list_files: Use ONLY when you need to discover what files exist or explore directory structure{Environment.NewLine}" +
-               $"- read_file: Use when you need to examine the contents of a specific file{Environment.NewLine}" +
-               $"- edit_file: Use when you need to create or modify code/text files{Environment.NewLine}" +
-               $"- bash: Use for running shell commands, building, or testing{Environment.NewLine}" +
+               $"- list_files: Use ONLY when you need to discover what files exist - if you want to CREATE files, use edit_file{Environment.NewLine}" +
+               $"- read_file: Use when you need to examine file contents - if file doesn't exist, use edit_file to create it{Environment.NewLine}" +
+               $"- edit_file: Use to create new files OR modify existing ones - this is your IMPLEMENTATION tool{Environment.NewLine}" +
+               $"- bash: Use for running shell commands, building, testing, or checking file status{Environment.NewLine}" +
                $"- Other tools: Use as needed for validation or specific operations{Environment.NewLine}" +
                $"{Environment.NewLine}" +
                $"CRITICAL - AVOID UNNECESSARY TOOL CALLS:{Environment.NewLine}" +
-               $"- Do not use list_files just to explore - use it only when you genuinely need to know what files exist{Environment.NewLine}" +
-               $"- Do not repeatedly use the same tool - use it once to get information, then use other tools{Environment.NewLine}" +
-               $"- Each tool call should have a specific purpose and move the task forward{Environment.NewLine}" +
+               $"- Do not use list_files to explore if you know what file you need - use edit_file or read_file directly{Environment.NewLine}" +
+               $"- Do not repeatedly use the same tool with the same parameters - you already have the result{Environment.NewLine}" +
+               $"- Each tool call should have a NEW purpose and move the task FORWARD{Environment.NewLine}" +
+               $"- If you got 0 results from list_files, the next action should NOT be list_files again{Environment.NewLine}" +
                $"{Environment.NewLine}" +
                $"METHODICAL APPROACH FOR CODE IMPLEMENTATION:{Environment.NewLine}" +
-               $"1. UNDERSTAND THE TASK: Read the definition of done carefully{Environment.NewLine}" +
-               $"2. EXECUTE: Use the most appropriate tool for each step (edit_file, bash, read_file, etc.){Environment.NewLine}" +
-               $"3. VALIDATE: Check that requirements are met{Environment.NewLine}" +
-               $"4. USE TOOLS STRATEGICALLY: Not all tasks require exploration - some need direct action{Environment.NewLine}" +
+               $"1. UNDERSTAND: Read the definition of done carefully{Environment.NewLine}" +
+               $"2. EXECUTE: Use edit_file to create or modify files as needed{Environment.NewLine}" +
+               $"3. VERIFY: Use bash or read_file to verify changes{Environment.NewLine}" +
+               $"4. ADAPT: If verify fails, immediately try a different approach - do not repeat the same action{Environment.NewLine}" +
                $"{Environment.NewLine}" +
                $"IMPORTANT NOTES:{Environment.NewLine}" +
-               $"- Do not assume files exist - use read_file or bash to check, then use appropriate tool{Environment.NewLine}" +
-               $"- If you know what file you need to edit, use edit_file directly{Environment.NewLine}" +
-               $"- When creating new functionality, use edit_file to create/modify files as needed{Environment.NewLine}" +
+               $"- When you learn something new from a tool result, you MUST change your next action based on that knowledge{Environment.NewLine}" +
+               $"  Example: 'folder is empty' → use edit_file to create files{Environment.NewLine}" +
+               $"  Example: 'file not found' → use edit_file to create the file{Environment.NewLine}" +
+               $"  Example: 'build failed' → fix the error and rebuild{Environment.NewLine}" +
+               $"- If you know what file you need to edit, use edit_file directly - do not explore first{Environment.NewLine}" +
+               $"- When creating new functionality, use edit_file to create/modify files as the MAIN implementation step{Environment.NewLine}" +
                $"- Use bash for compilation, testing, or running commands{Environment.NewLine}" +
                $"- When adding features, look at existing similar code patterns to understand the approach{Environment.NewLine}" +
                $"- Vary your tool usage based on actual task requirements{Environment.NewLine}" +
                $"{Environment.NewLine}" +
-               $"Always use tools actively to complete the task - do not just provide instructions or explanations.{Environment.NewLine}" +
-               $"Pick the right tool for each specific action you need to take.";
+               $"Always use tools actively to complete the task - do not just provide instructions.{Environment.NewLine}" +
+               $"If results show incomplete work, CONTINUE WORKING - do not mark it as done.{Environment.NewLine}" +
+               $"Pick the right tool for each specific action needed.";
     }
 }
 
