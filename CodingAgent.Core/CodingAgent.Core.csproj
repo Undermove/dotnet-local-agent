@@ -14,4 +14,8 @@
     <PackageReference Include="NJsonSchema" Version="11.5.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="agentdir\" />
+  </ItemGroup>
+
 </Project>

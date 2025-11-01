@@ -19,6 +19,17 @@ public class CodeSearchToolProgram
 
         try
         {
+            // Initialize path validator if working directory is specified
+            PathValidator pathValidator = null;
+            if (!string.IsNullOrEmpty(cmdArgs.WorkingDirectory))
+            {
+                pathValidator = new PathValidator(cmdArgs.WorkingDirectory);
+                if (cmdArgs.Verbose)
+                {
+                    Console.WriteLine($"Working directory set to: {pathValidator.WorkingDirectory}");
+                }
+            }
+
             var provider = cmdArgs.CreateProvider();
 
             if (cmdArgs.Provider == AIProviderType.Anthropic)
@@ -30,6 +41,13 @@ public class CodeSearchToolProgram
                 {
                     Console.WriteLine("Anthropic client initialized");
                 }
+
+                // Set path validators for tools
+                ReadFileDefinition.PathValidator = pathValidator;
+                ListFilesDefinition.PathValidator = pathValidator;
+                BashDefinition.WorkingDirectory = pathValidator?.WorkingDirectory;
+                EditFileDefinition.PathValidator = pathValidator;
+                CodeSearchDefinition.PathValidator = pathValidator;
 
                 var tools = new List<ToolDefinition> 
                 { 
@@ -82,6 +100,8 @@ public class CodeSearchToolProgram
 
 public static class CodeSearchDefinition
 {
+    public static PathValidator? PathValidator { get; set; }
+
     public static ToolDefinition Instance = new ToolDefinition
     {
         Name = "code_search",
@@ -98,6 +118,12 @@ public static class CodeSearchDefinition
             
         try
         {
+            // Validate search path if working directory is specified
+            if (PathValidator != null && !string.IsNullOrEmpty(searchInput.Path))
+            {
+                searchInput.Path = PathValidator.ValidateDirectoryPath(searchInput.Path);
+            }
+
             // Try to use ripgrep if available, otherwise fall back to grep
             var result = await TryRipgrepAsync(searchInput) ?? await TryGrepAsync(searchInput);
                 

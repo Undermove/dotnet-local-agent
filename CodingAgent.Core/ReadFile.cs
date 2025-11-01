@@ -19,6 +19,17 @@ public class ReadFileProgram
 
         try
         {
+            // Initialize path validator if working directory is specified
+            PathValidator pathValidator = null;
+            if (!string.IsNullOrEmpty(cmdArgs.WorkingDirectory))
+            {
+                pathValidator = new PathValidator(cmdArgs.WorkingDirectory);
+                if (cmdArgs.Verbose)
+                {
+                    Console.WriteLine($"Working directory set to: {pathValidator.WorkingDirectory}");
+                }
+            }
+            
             var provider = cmdArgs.CreateProvider();
 
             if (cmdArgs.Provider == AIProviderType.Anthropic)
@@ -30,6 +41,9 @@ public class ReadFileProgram
                 {
                     Console.WriteLine("Anthropic client initialized");
                 }
+
+                // Set path validator for read_file tool
+                ReadFileDefinition.PathValidator = pathValidator;
 
                 var tools = new List<ToolDefinition> { ReadFileDefinition.Instance };
                 if (cmdArgs.Verbose)
@@ -367,6 +381,8 @@ public class ToolDefinition
 
 public static class ReadFileDefinition
 {
+    public static PathValidator? PathValidator { get; set; }
+
     public static ToolDefinition Instance = new ToolDefinition
     {
         Name = "read_file",
@@ -383,7 +399,14 @@ public static class ReadFileDefinition
             
         try
         {
-            var content = await File.ReadAllTextAsync(readFileInput.Path);
+            // Validate path is within working directory
+            var validatedPath = readFileInput.Path;
+            if (PathValidator != null)
+            {
+                validatedPath = PathValidator.ValidatePath(readFileInput.Path);
+            }
+
+            var content = await File.ReadAllTextAsync(validatedPath);
             Console.WriteLine($"Successfully read file {readFileInput.Path} ({content.Length} bytes)");
             return content;
         }

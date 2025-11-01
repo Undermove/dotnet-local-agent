@@ -19,6 +19,17 @@ public class BashToolProgram
 
         try
         {
+            // Initialize path validator if working directory is specified
+            PathValidator pathValidator = null;
+            if (!string.IsNullOrEmpty(cmdArgs.WorkingDirectory))
+            {
+                pathValidator = new PathValidator(cmdArgs.WorkingDirectory);
+                if (cmdArgs.Verbose)
+                {
+                    Console.WriteLine($"Working directory set to: {pathValidator.WorkingDirectory}");
+                }
+            }
+
             var provider = cmdArgs.CreateProvider();
 
             if (cmdArgs.Provider == AIProviderType.Anthropic)
@@ -30,6 +41,11 @@ public class BashToolProgram
                 {
                     Console.WriteLine("Anthropic client initialized");
                 }
+
+                // Set path validators for tools
+                ReadFileDefinition.PathValidator = pathValidator;
+                ListFilesDefinition.PathValidator = pathValidator;
+                BashDefinition.WorkingDirectory = pathValidator?.WorkingDirectory;
 
                 var tools = new List<ToolDefinition> 
                 { 
@@ -80,6 +96,8 @@ public class BashToolProgram
 
 public static class BashDefinition
 {
+    public static string? WorkingDirectory { get; set; }
+
     public static ToolDefinition Instance = new ToolDefinition
     {
         Name = "bash",
@@ -105,6 +123,12 @@ public static class BashDefinition
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // Set working directory if specified
+            if (!string.IsNullOrEmpty(WorkingDirectory))
+            {
+                processStartInfo.WorkingDirectory = WorkingDirectory;
+            }
 
             using var process = new Process { StartInfo = processStartInfo };
             process.Start();

@@ -18,7 +18,24 @@ public class EditToolProgram
 
         try
         {
+            // Initialize path validator if working directory is specified
+            PathValidator pathValidator = null;
+            if (!string.IsNullOrEmpty(cmdArgs.WorkingDirectory))
+            {
+                pathValidator = new PathValidator(cmdArgs.WorkingDirectory);
+                if (cmdArgs.Verbose)
+                {
+                    Console.WriteLine($"Working directory set to: {pathValidator.WorkingDirectory}");
+                }
+            }
+
             var provider = cmdArgs.CreateProvider();
+
+            // Set path validators for tools
+            ReadFileDefinition.PathValidator = pathValidator;
+            ListFilesDefinition.PathValidator = pathValidator;
+            BashDefinition.WorkingDirectory = pathValidator?.WorkingDirectory;
+            EditFileDefinition.PathValidator = pathValidator;
 
             // Используем универсальный агент с инструментами для всех провайдеров
             var tools = new List<ToolDefinition> 
@@ -63,6 +80,8 @@ public class EditToolProgram
 
 public static class EditFileDefinition
 {
+    public static PathValidator? PathValidator { get; set; }
+
     public static ToolDefinition Instance = new ToolDefinition
     {
         Name = "edit_file",
@@ -117,8 +136,15 @@ IMPORTANT: Always provide meaningful content in 'new_str' - never leave it empty
             
         try
         {
+            // Validate path is within working directory
+            var validatedPath = editFileInput.Path;
+            if (PathValidator != null)
+            {
+                validatedPath = PathValidator.ValidatePath(editFileInput.Path);
+            }
+
             string content;
-            bool fileExists = File.Exists(editFileInput.Path);
+            bool fileExists = File.Exists(validatedPath);
                 
             // Special case: creating a new file
             if (!fileExists && string.IsNullOrEmpty(editFileInput.OldStr))
@@ -129,14 +155,14 @@ IMPORTANT: Always provide meaningful content in 'new_str' - never leave it empty
                 }
                 
                 // Create directory if it doesn't exist
-                var directory = Path.GetDirectoryName(editFileInput.Path);
+                var directory = Path.GetDirectoryName(validatedPath);
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 {
                     Directory.CreateDirectory(directory);
                 }
                 
                 Console.WriteLine($"Creating new file: {editFileInput.Path}");
-                await File.WriteAllTextAsync(editFileInput.Path, editFileInput.NewStr);
+                await File.WriteAllTextAsync(validatedPath, editFileInput.NewStr);
                 return $"Successfully created file '{editFileInput.Path}' with {editFileInput.NewStr.Length} characters of content.";
             }
                 
@@ -154,7 +180,7 @@ IMPORTANT: Always provide meaningful content in 'new_str' - never leave it empty
 
             if (fileExists)
             {
-                content = await File.ReadAllTextAsync(editFileInput.Path);
+                content = await File.ReadAllTextAsync(validatedPath);
                     
                 // Check if old_str exists in the file
                 if (!content.Contains(editFileInput.OldStr))
@@ -185,14 +211,14 @@ IMPORTANT: Always provide meaningful content in 'new_str' - never leave it empty
                 content = editFileInput.NewStr;
                     
                 // Create directory if it doesn't exist
-                var directory = Path.GetDirectoryName(editFileInput.Path);
+                var directory = Path.GetDirectoryName(validatedPath);
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 {
                     Directory.CreateDirectory(directory);
                 }
             }
                 
-            await File.WriteAllTextAsync(editFileInput.Path, content);
+            await File.WriteAllTextAsync(validatedPath, content);
                 
             var action = fileExists ? "modified" : "created";
             var result = $"File {editFileInput.Path} {action} successfully";

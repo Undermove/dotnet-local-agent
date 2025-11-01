@@ -18,6 +18,17 @@ public class ListFilesProgram
 
         try
         {
+            // Initialize path validator if working directory is specified
+            PathValidator pathValidator = null;
+            if (!string.IsNullOrEmpty(cmdArgs.WorkingDirectory))
+            {
+                pathValidator = new PathValidator(cmdArgs.WorkingDirectory);
+                if (cmdArgs.Verbose)
+                {
+                    Console.WriteLine($"Working directory set to: {pathValidator.WorkingDirectory}");
+                }
+            }
+
             var provider = cmdArgs.CreateProvider();
 
             if (cmdArgs.Provider == AIProviderType.Anthropic)
@@ -29,6 +40,10 @@ public class ListFilesProgram
                 {
                     Console.WriteLine("Anthropic client initialized");
                 }
+
+                // Set path validators for tools
+                ReadFileDefinition.PathValidator = pathValidator;
+                ListFilesDefinition.PathValidator = pathValidator;
 
                 var tools = new List<ToolDefinition> 
                 { 
@@ -78,6 +93,8 @@ public class ListFilesProgram
 
 public static class ListFilesDefinition
 {
+    public static PathValidator? PathValidator { get; set; }
+
     public static ToolDefinition Instance = new ToolDefinition
     {
         Name = "list_files",
@@ -96,25 +113,32 @@ public static class ListFilesDefinition
             
         try
         {
+            // Validate path is within working directory
+            var validatedDir = dir;
+            if (PathValidator != null)
+            {
+                validatedDir = PathValidator.ValidateDirectoryPath(dir);
+            }
+
             var files = new List<string>();
                 
             await Task.Run(() =>
             {
                 // Check if directory exists
-                if (!Directory.Exists(dir))
+                if (!Directory.Exists(validatedDir))
                 {
-                    Console.WriteLine($"Directory does not exist: {dir}");
+                    Console.WriteLine($"Directory does not exist: {validatedDir}");
                     return;
                 }
                 
-                var directoryInfo = new DirectoryInfo(dir);
+                var directoryInfo = new DirectoryInfo(validatedDir);
                     
                 // Get all files and directories recursively
                 var allItems = directoryInfo.GetFileSystemInfos("*", SearchOption.AllDirectories);
                     
                 foreach (var item in allItems)
                 {
-                    var relativePath = Path.GetRelativePath(dir, item.FullName);
+                    var relativePath = Path.GetRelativePath(validatedDir, item.FullName);
                         
                     // Skip .devenv directory and its contents
                     if (relativePath.StartsWith(".devenv") || relativePath.Contains("/.devenv/") || relativePath.Contains("\\.devenv\\"))

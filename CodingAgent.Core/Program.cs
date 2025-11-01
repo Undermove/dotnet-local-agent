@@ -75,6 +75,7 @@ class Program
         Console.WriteLine("  --provider <name>   AI provider: anthropic (default) or lmstudio");
         Console.WriteLine("  --model <name>      Model name (optional)");
         Console.WriteLine("  --base-url <url>    Base URL for LM Studio (default: http://localhost:1234)");
+        Console.WriteLine("  --workdir <path>    Working directory (agent operations limited to this folder)");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  dotnet run chat");
@@ -82,6 +83,7 @@ class Program
         Console.WriteLine("  dotnet run read --provider lmstudio --base-url http://localhost:1234");
         Console.WriteLine("  dotnet run edit --verbose --provider anthropic");
         Console.WriteLine("  dotnet run complete --verbose --provider anthropic");
+        Console.WriteLine("  dotnet run read --workdir /home/user/projects/myapp");
         Console.WriteLine();
         Console.WriteLine("Environment Variables:");
         Console.WriteLine("  ANTHROPIC_API_KEY  Required for Anthropic provider");

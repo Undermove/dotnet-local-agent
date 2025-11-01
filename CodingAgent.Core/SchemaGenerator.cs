@@ -38,7 +38,9 @@ public static class SchemaGenerator
                     
                 if (prop.Value.TryGetProperty("type", out var typeElement))
                 {
-                    propSchema["type"] = typeElement.GetString() ?? "string";
+                    propSchema["type"] = typeElement.ValueKind == JsonValueKind.String 
+                        ? typeElement.GetString() ?? "string" 
+                        : "string";
                 }
                 else
                 {
@@ -47,7 +49,9 @@ public static class SchemaGenerator
                     
                 if (prop.Value.TryGetProperty("description", out var descElement))
                 {
-                    propSchema["description"] = descElement.GetString() ?? "";
+                    propSchema["description"] = descElement.ValueKind == JsonValueKind.String
+                        ? descElement.GetString() ?? ""
+                        : "";
                 }
                     
                 properties[prop.Name] = propSchema;

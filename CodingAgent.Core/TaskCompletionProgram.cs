@@ -15,7 +15,25 @@ public class TaskCompletionProgram
 
         try
         {
+            // Initialize path validator if working directory is specified
+            PathValidator pathValidator = null;
+            if (!string.IsNullOrEmpty(cmdArgs.WorkingDirectory))
+            {
+                pathValidator = new PathValidator(cmdArgs.WorkingDirectory);
+                if (cmdArgs.Verbose)
+                {
+                    Console.WriteLine($"Working directory set to: {pathValidator.WorkingDirectory}");
+                }
+            }
+
             var provider = cmdArgs.CreateProvider();
+
+            // Set path validators for tools
+            ReadFileDefinition.PathValidator = pathValidator;
+            ListFilesDefinition.PathValidator = pathValidator;
+            BashDefinition.WorkingDirectory = pathValidator?.WorkingDirectory;
+            EditFileDefinition.PathValidator = pathValidator;
+            CodeSearchDefinition.PathValidator = pathValidator;
 
             // Используем основные инструменты для Task Completion Agent
             // CodeSearchDefinition исключен, так как он требует ripgrep и не критичен для основной функциональности

@@ -6,6 +6,7 @@ public class CommandLineArgs
     public AIProviderType Provider { get; set; } = AIProviderType.Anthropic;
     public string? Model { get; set; }
     public string? BaseUrl { get; set; }
+    public string? WorkingDirectory { get; set; }
 
     public static CommandLineArgs Parse(string[] args)
     {
@@ -61,6 +62,14 @@ public class CommandLineArgs
                     {
                         result.BaseUrl = args[i + 1];
                         i++; // Skip the next argument as it's the base URL
+                    }
+                    break;
+                    
+                case "--workdir":
+                    if (i + 1 < args.Length)
+                    {
+                        result.WorkingDirectory = args[i + 1];
+                        i++; // Skip the next argument as it's the working directory
                     }
                     break;
             }
