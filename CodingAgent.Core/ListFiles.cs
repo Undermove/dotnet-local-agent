@@ -140,7 +140,7 @@ public static class ListFilesDefinition
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to list files in {dir}: {ex.Message}");
-            throw;
+            return $"Error listing files: {ex.Message}";
         }
     }
 }

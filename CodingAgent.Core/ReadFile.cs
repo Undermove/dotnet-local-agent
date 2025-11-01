@@ -166,7 +166,6 @@ public class AgentWithTools(
 
                         // Find and execute the tool
                         string toolResult = null;
-                        Exception toolError = null;
                         bool toolFound = false;
 
                         foreach (var tool in tools)
@@ -188,7 +187,8 @@ public class AgentWithTools(
                                 }
                                 catch (Exception ex)
                                 {
-                                    toolError = ex;
+                                    // Capture error and pass it as tool result
+                                    toolResult = $"Error: {ex.Message}";
                                     Console.WriteLine($"\u001b[91merror\u001b[0m: {ex.Message}");
                                     if (verbose)
                                     {
@@ -202,29 +202,17 @@ public class AgentWithTools(
 
                         if (!toolFound)
                         {
-                            toolError = new Exception($"tool '{toolUse.Name}' not found");
-                            Console.WriteLine($"\u001b[91merror\u001b[0m: {toolError.Message}");
+                            toolResult = $"Error: tool '{toolUse.Name}' not found";
+                            Console.WriteLine($"\u001b[91merror\u001b[0m: {toolResult}");
                         }
 
-                        // Add tool result to collection
-                        if (toolError != null)
+                        // Add tool result to collection (tools now return errors as strings)
+                        toolResults.Add(new ToolResultContent
                         {
-                            toolResults.Add(new ToolResultContent
-                            {
-                                ToolUseId = toolUse.Id,
-                                Content = new List<ContentBase> { new TextContent { Text = toolError.Message } },
-                                IsError = true
-                            });
-                        }
-                        else
-                        {
-                            toolResults.Add(new ToolResultContent
-                            {
-                                ToolUseId = toolUse.Id,
-                                Content = new List<ContentBase> { new TextContent { Text = toolResult ?? "" } },
-                                IsError = false
-                            });
-                        }
+                            ToolUseId = toolUse.Id,
+                            Content = new List<ContentBase> { new TextContent { Text = toolResult ?? "" } },
+                            IsError = false
+                        });
                     }
                 }
 
@@ -402,7 +390,7 @@ public static class ReadFileDefinition
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to read file {readFileInput.Path}: {ex.Message}");
-            throw;
+            return $"Error reading file: {ex.Message}";
         }
     }
 }

@@ -100,7 +100,6 @@ public class UniversalAgentWithTools(
 
             // Находим и выполняем инструмент
             string toolResult = null;
-            Exception toolError = null;
             bool toolFound = false;
 
             foreach (var tool in tools)
@@ -122,7 +121,8 @@ public class UniversalAgentWithTools(
                     }
                     catch (Exception ex)
                     {
-                        toolError = ex;
+                        // Capture error and pass it as tool result
+                        toolResult = $"Error: {ex.Message}";
                         Console.WriteLine($"\u001b[91merror\u001b[0m: {ex.Message}");
                         if (verbose)
                         {
@@ -136,14 +136,12 @@ public class UniversalAgentWithTools(
 
             if (!toolFound)
             {
-                toolError = new Exception($"tool '{toolCall.Name}' not found");
-                Console.WriteLine($"\u001b[91merror\u001b[0m: {toolError.Message}");
+                toolResult = $"Error: tool '{toolCall.Name}' not found";
+                Console.WriteLine($"\u001b[91merror\u001b[0m: {toolResult}");
             }
 
-            // Добавляем результат инструмента в разговор
-            var resultMessage = toolError != null 
-                ? $"Error executing {toolCall.Name}: {toolError.Message}"
-                : toolResult ?? "Tool executed successfully";
+            // Добавляем результат инструмента в разговор (инструменты теперь возвращают ошибки как строки)
+            var resultMessage = toolResult ?? "Tool executed successfully";
             
             toolResults.Add(resultMessage);
         }

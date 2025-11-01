@@ -137,7 +137,7 @@ public static class BashDefinition
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to execute command: {ex.Message}");
-            throw;
+            return $"Error executing command: {ex.Message}";
         }
     }
 }

@@ -202,7 +202,7 @@ IMPORTANT: Always provide meaningful content in 'new_str' - never leave it empty
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to edit file {editFileInput.Path}: {ex.Message}");
-            throw;
+            return $"Error editing file: {ex.Message}";
         }
     }
 }

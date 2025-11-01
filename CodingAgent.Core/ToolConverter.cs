@@ -11,7 +11,7 @@ public static class ToolConverter
         
         if (verbose)
         {
-            Console.WriteLine($"🔄 ToolConverter - Converting {tools.Count} tools to OpenAI format");
+            // Console.WriteLine($"🔄 ToolConverter - Converting {tools.Count} tools to OpenAI format");
         }
         
         foreach (var tool in tools)
@@ -25,7 +25,7 @@ public static class ToolConverter
                 
                 if (verbose)
                 {
-                    Console.WriteLine($"✅ ToolConverter - Converted tool: '{tool.Name}'");
+                    //Console.WriteLine($"✅ ToolConverter - Converted tool: '{tool.Name}'");
                 }
             }
             catch (Exception ex)
@@ -44,7 +44,7 @@ public static class ToolConverter
         
         if (verbose)
         {
-            Console.WriteLine($"🔄 ToolConverter - Total tools ready: {openAITools.Count}");
+            // Console.WriteLine($"🔄 ToolConverter - Total tools ready: {openAITools.Count}");
         }
         
         return openAITools;

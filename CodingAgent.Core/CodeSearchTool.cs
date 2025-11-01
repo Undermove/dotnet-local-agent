@@ -107,7 +107,7 @@ public static class CodeSearchDefinition
         catch (Exception ex)
         {
             Console.WriteLine($"Search failed: {ex.Message}");
-            throw;
+            return $"Error during search: {ex.Message}";
         }
     }
 
